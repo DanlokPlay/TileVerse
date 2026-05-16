@@ -333,6 +333,7 @@ public sealed class PuzzleGameController : MonoBehaviour
     private void ShowSetupScreen()
     {
         SetScreenState(false, true, false);
+        FitRawImageToParent(previewImage, selectedTexture);
         SetSetupStatus("Выберите изображение, настройте сетку разрезания и начните игру.");
     }
 
@@ -367,6 +368,7 @@ public sealed class PuzzleGameController : MonoBehaviour
         {
             previewImage.texture = sourceImage.Texture;
             previewImage.color = Color.white;
+            FitRawImageToParent(previewImage, sourceImage.Texture);
         }
 
         if (boardGuideImage != null)
@@ -380,6 +382,43 @@ public sealed class PuzzleGameController : MonoBehaviour
         }
 
         SetSetupStatus($"Выбрано изображение «{sourceImage.DisplayName}». Теперь задайте размер разрезания.");
+    }
+
+    private static void FitRawImageToParent(RawImage image, Texture texture)
+    {
+        if (image == null || texture == null)
+        {
+            return;
+        }
+
+        var imageRect = image.rectTransform;
+        var parentRect = imageRect.parent as RectTransform;
+        if (parentRect == null)
+        {
+            return;
+        }
+
+        var parentSize = parentRect.rect.size;
+        if (parentSize.x <= 0f || parentSize.y <= 0f)
+        {
+            return;
+        }
+
+        var textureAspect = texture.width / (float)texture.height;
+        var parentAspect = parentSize.x / parentSize.y;
+
+        Vector2 fittedSize;
+        if (textureAspect > parentAspect)
+        {
+            fittedSize = new Vector2(parentSize.x, parentSize.x / textureAspect);
+        }
+        else
+        {
+            fittedSize = new Vector2(parentSize.y * textureAspect, parentSize.y);
+        }
+
+        imageRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, fittedSize.x);
+        imageRect.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, fittedSize.y);
     }
 
     private void LoadCustomImage()
