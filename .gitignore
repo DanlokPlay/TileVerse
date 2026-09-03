@@ -39,6 +39,7 @@ ExportedObj/
 *.sln
 *.suo
 *.tmp
+.superpowers/
 *.user
 *.userprefs
 *.pidb
