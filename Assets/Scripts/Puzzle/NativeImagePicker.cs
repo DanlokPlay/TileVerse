@@ -55,10 +55,21 @@ internal static class WindowsFileDialog
 
     public static string OpenFile()
     {
+        return OpenFile("Image Files\0*.png;*.jpg;*.jpeg\0All Files\0*.*\0", "Выберите изображение");
+    }
+
+    public static string OpenVideoFile()
+    {
+        return OpenFile("Video Files\0*.mp4;*.mov;*.webm;*.m4v;*.avi\0All Files\0*.*\0", "Выберите видео");
+    }
+
+    private static string OpenFile(string filter, string title)
+    {
         var dialog = new OpenFileName
         {
-            filter = "Image Files\0*.png;*.jpg;*.jpeg\0All Files\0*.*\0",
-            initialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures)
+            filter = filter,
+            initialDirectory = Environment.GetFolderPath(Environment.SpecialFolder.MyPictures),
+            title = title
         };
 
         return GetOpenFileName(dialog) ? dialog.file.ToString() : string.Empty;
