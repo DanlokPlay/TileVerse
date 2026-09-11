@@ -381,9 +381,15 @@ public sealed class PuzzleGameController : MonoBehaviour
     private Vector2 BuildSpawnPosition(RectTransform area, List<Vector2> existing)
     {
         if (area == null) return Vector2.zero;
-        var piece = currentLayout.MaxPieceUiSize * sideAreaPieceScale; var half = piece * 0.5f; var areaHalf = area.rect.size * 0.5f;
-        var minX = -areaHalf.x + half.x + SpawnPadding; var maxX = areaHalf.x - half.x - SpawnPadding; var minY = -areaHalf.y + half.y + SpawnPadding; var maxY = areaHalf.y - half.y - SpawnPadding;
-        if (minX > maxX) minX = maxX = 0f; if (minY > maxY) minY = maxY = 0f;
+        var piece = currentLayout.MaxPieceUiSize * sideAreaPieceScale;
+        var half = piece * 0.5f;
+        var bounds = area.rect;
+        var minX = bounds.xMin + half.x + SpawnPadding;
+        var maxX = bounds.xMax - half.x - SpawnPadding;
+        var minY = bounds.yMin + half.y + SpawnPadding;
+        var maxY = bounds.yMax - half.y - SpawnPadding;
+        if (minX > maxX) minX = maxX = bounds.center.x;
+        if (minY > maxY) minY = maxY = bounds.center.y;
         var distance = Mathf.Max(18f, Mathf.Min(piece.x, piece.y) * 0.32f);
         for (var attempt = 0; attempt < 160; attempt++)
         {
