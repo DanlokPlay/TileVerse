@@ -81,23 +81,22 @@ internal static class PuzzleSceneInstaller
 
         var ornamentRoot = CreateRect("Ornate Frame Parts", outerFrame.rectTransform);
         Stretch(ornamentRoot, 0f);
-        var cornerSprite = LoadFrameSprite("Assets/Art/Frames/OrnateGoldCorner.png");
-        var horizontalEdgeSprite = LoadFrameSprite("Assets/Art/Frames/OrnateGoldHorizontalEdge.png");
-        var verticalEdgeSprite = LoadFrameSprite("Assets/Art/Frames/OrnateGoldVerticalEdge.png");
-        var horizontalTrimSprite = LoadFrameSprite("Assets/Art/Frames/OrnateGoldInnerTrimHorizontal.png");
-        var verticalTrimSprite = LoadFrameSprite("Assets/Art/Frames/OrnateGoldInnerTrimVertical.png");
-        var topLeftCorner = CreateFramePart("Top Left Corner", ornamentRoot, cornerSprite, Image.Type.Simple);
-        var topRightCorner = CreateFramePart("Top Right Corner", ornamentRoot, cornerSprite, Image.Type.Simple);
-        var bottomLeftCorner = CreateFramePart("Bottom Left Corner", ornamentRoot, cornerSprite, Image.Type.Simple);
-        var bottomRightCorner = CreateFramePart("Bottom Right Corner", ornamentRoot, cornerSprite, Image.Type.Simple);
-        var topEdge = CreateFramePart("Top Edge", ornamentRoot, horizontalEdgeSprite, Image.Type.Tiled);
-        var bottomEdge = CreateFramePart("Bottom Edge", ornamentRoot, horizontalEdgeSprite, Image.Type.Tiled);
-        var leftEdge = CreateFramePart("Left Edge", ornamentRoot, verticalEdgeSprite, Image.Type.Tiled);
-        var rightEdge = CreateFramePart("Right Edge", ornamentRoot, verticalEdgeSprite, Image.Type.Tiled);
-        var topInnerTrim = CreateFramePart("Top Inner Trim", ornamentRoot, horizontalTrimSprite, Image.Type.Tiled);
-        var bottomInnerTrim = CreateFramePart("Bottom Inner Trim", ornamentRoot, horizontalTrimSprite, Image.Type.Tiled);
-        var leftInnerTrim = CreateFramePart("Left Inner Trim", ornamentRoot, verticalTrimSprite, Image.Type.Tiled);
-        var rightInnerTrim = CreateFramePart("Right Inner Trim", ornamentRoot, verticalTrimSprite, Image.Type.Tiled);
+        var topLeftCornerSprite = LoadFrameSprite("Assets/Art/Frames/Coherent/OrnateGoldTopLeftCorner.png");
+        var topRightCornerSprite = LoadFrameSprite("Assets/Art/Frames/Coherent/OrnateGoldTopRightCorner.png");
+        var bottomLeftCornerSprite = LoadFrameSprite("Assets/Art/Frames/Coherent/OrnateGoldBottomLeftCorner.png");
+        var bottomRightCornerSprite = LoadFrameSprite("Assets/Art/Frames/Coherent/OrnateGoldBottomRightCorner.png");
+        var topEdgeSprite = LoadFrameSprite("Assets/Art/Frames/Coherent/OrnateGoldTopEdge.png");
+        var bottomEdgeSprite = LoadFrameSprite("Assets/Art/Frames/Coherent/OrnateGoldBottomEdge.png");
+        var leftEdgeSprite = LoadFrameSprite("Assets/Art/Frames/Coherent/OrnateGoldLeftEdge.png");
+        var rightEdgeSprite = LoadFrameSprite("Assets/Art/Frames/Coherent/OrnateGoldRightEdge.png");
+        var topLeftCorner = CreateFramePart("Top Left Corner", ornamentRoot, topLeftCornerSprite, Image.Type.Simple);
+        var topRightCorner = CreateFramePart("Top Right Corner", ornamentRoot, topRightCornerSprite, Image.Type.Simple);
+        var bottomLeftCorner = CreateFramePart("Bottom Left Corner", ornamentRoot, bottomLeftCornerSprite, Image.Type.Simple);
+        var bottomRightCorner = CreateFramePart("Bottom Right Corner", ornamentRoot, bottomRightCornerSprite, Image.Type.Simple);
+        var topEdge = CreateFramePart("Top Edge", ornamentRoot, topEdgeSprite, Image.Type.Simple);
+        var bottomEdge = CreateFramePart("Bottom Edge", ornamentRoot, bottomEdgeSprite, Image.Type.Simple);
+        var leftEdge = CreateFramePart("Left Edge", ornamentRoot, leftEdgeSprite, Image.Type.Simple);
+        var rightEdge = CreateFramePart("Right Edge", ornamentRoot, rightEdgeSprite, Image.Type.Simple);
 
         var guide = CreateRawImage("Puzzle Guide", contentRoot, new Color(1f, 1f, 1f, 0.13f), false);
         Stretch(guide.rectTransform, 0f);
@@ -133,8 +132,8 @@ internal static class PuzzleSceneInstaller
         frameView.Configure(frameTemplate, outerFrame.rectTransform, innerShadow.rectTransform, goldTrim.rectTransform, mat.rectTransform, contentRoot,
             outerFrame, innerShadow, goldTrim, mat);
         var ornateFrame = GetOrAdd<PuzzleOrnateFrameView>(controller.gameObject);
-        ornateFrame.Configure(ornamentRoot, topLeftCorner, topRightCorner, bottomLeftCorner, bottomRightCorner, topEdge, bottomEdge, leftEdge, rightEdge,
-            topInnerTrim, bottomInnerTrim, leftInnerTrim, rightInnerTrim);
+        ornateFrame.Configure(ornamentRoot, topLeftCorner, topRightCorner, bottomLeftCorner, bottomRightCorner, topEdge, bottomEdge, leftEdge, rightEdge);
+        ornateFrame.UseCoherentMasterPreset();
         frameView.ConfigureOrnament(ornateFrame);
         var boardLayout = GetOrAdd<PuzzleBoardLayout>(controller.gameObject);
         boardLayout.Configure(gameplayRoot, frameTemplate, leftArea, rightArea, frameView);
@@ -284,7 +283,7 @@ internal static class PuzzleSceneInstaller
                                importer.spriteImportMode != SpriteImportMode.Single ||
                                !importer.alphaIsTransparency ||
                                importer.mipmapEnabled ||
-                               importer.wrapMode != TextureWrapMode.Repeat ||
+                                importer.wrapMode != TextureWrapMode.Clamp ||
                                importer.spritePixelsPerUnit != 512f ||
                                importer.maxTextureSize != 2048;
             if (mustReimport)
@@ -293,7 +292,7 @@ internal static class PuzzleSceneInstaller
                 importer.spriteImportMode = SpriteImportMode.Single;
                 importer.alphaIsTransparency = true;
                 importer.mipmapEnabled = false;
-                importer.wrapMode = TextureWrapMode.Repeat;
+                importer.wrapMode = TextureWrapMode.Clamp;
                 importer.filterMode = FilterMode.Bilinear;
                 importer.spritePixelsPerUnit = 512f;
                 importer.maxTextureSize = 2048;
