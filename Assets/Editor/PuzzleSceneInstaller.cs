@@ -212,6 +212,8 @@ internal static class PuzzleSceneInstaller
             settingsCanvas, selectedLabel, statusLabel, horizontalValue, verticalValue, horizontalSlider, verticalSlider, builtInA, builtInB, customImage, customVideo,
             themeButton, applyButton, closeButton, confirmation.gameObject, resetConfirm, resetCancel, entries);
 
+        ApplyEditorPreviewLayout(frameView, frameTemplate, leftArea, rightArea, mountains ?? glade);
+
         settingsCanvas.gameObject.SetActive(false);
 
         EditorUtility.SetDirty(controller);
@@ -300,6 +302,51 @@ internal static class PuzzleSceneInstaller
         }
 
         return AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
+    }
+
+    private static void ApplyEditorPreviewLayout(PuzzleFrameView frameView, RectTransform frameTemplate, RectTransform leftArea, RectTransform rightArea, Texture2D previewTexture)
+    {
+        if (frameView == null || frameTemplate == null)
+        {
+            return;
+        }
+
+        var previewContent = FitPreviewContent(previewTexture);
+        frameTemplate.anchorMin = frameTemplate.anchorMax = new Vector2(0.5f, 0.5f);
+        frameTemplate.pivot = new Vector2(0.5f, 0.5f);
+        frameTemplate.anchoredPosition = Vector2.zero;
+        frameView.Apply(PuzzleFrameStyle.Default, previewContent);
+        SetPreviewSpawnArea(leftArea, true);
+        SetPreviewSpawnArea(rightArea, false);
+    }
+
+    private static Vector2 FitPreviewContent(Texture2D texture)
+    {
+        const float maxWidth = 850f;
+        const float maxHeight = 680f;
+        var aspect = texture != null ? texture.width / (float)Mathf.Max(1, texture.height) : 4f / 3f;
+        var width = maxWidth;
+        var height = width / Mathf.Max(0.01f, aspect);
+        if (height > maxHeight)
+        {
+            height = maxHeight;
+            width = height * aspect;
+        }
+
+        return new Vector2(width, height);
+    }
+
+    private static void SetPreviewSpawnArea(RectTransform rect, bool left)
+    {
+        if (rect == null)
+        {
+            return;
+        }
+
+        rect.anchorMin = rect.anchorMax = new Vector2(left ? 0f : 1f, 0.5f);
+        rect.pivot = new Vector2(left ? 0f : 1f, 0.5f);
+        rect.anchoredPosition = Vector2.zero;
+        rect.sizeDelta = new Vector2(345f, 1024f);
     }
 
     private static Text CreateText(string name, Transform parent, string value, int fontSize, TextAnchor alignment)

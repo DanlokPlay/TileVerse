@@ -63,10 +63,10 @@ public sealed class PuzzleOrnateFrameView : MonoBehaviour
         var cornerSize = edgeWidth * Mathf.Max(1f, cornerSizeMultiplier);
         var trimWidth = Mathf.Min(Mathf.Max(1f, innerTrimWidth), edgeWidth);
 
-        SetCorner(topLeftCorner, new Vector2(0f, 1f), new Vector2(0f, 1f), cornerSize, Vector3.one);
-        SetCorner(topRightCorner, new Vector2(1f, 1f), new Vector2(1f, 1f), cornerSize, new Vector3(-1f, 1f, 1f));
-        SetCorner(bottomLeftCorner, new Vector2(0f, 0f), new Vector2(0f, 0f), cornerSize, new Vector3(1f, -1f, 1f));
-        SetCorner(bottomRightCorner, new Vector2(1f, 0f), new Vector2(1f, 0f), cornerSize, new Vector3(-1f, -1f, 1f));
+        SetCorner(topLeftCorner, new Vector2(0f, 1f), new Vector2(0f, 1f), cornerSize, Vector2.zero, Vector3.one);
+        SetCorner(topRightCorner, new Vector2(1f, 1f), new Vector2(1f, 1f), cornerSize, new Vector2(-cornerSize, 0f), new Vector3(-1f, 1f, 1f));
+        SetCorner(bottomLeftCorner, new Vector2(0f, 0f), new Vector2(0f, 0f), cornerSize, new Vector2(0f, cornerSize), new Vector3(1f, -1f, 1f));
+        SetCorner(bottomRightCorner, new Vector2(1f, 0f), new Vector2(1f, 0f), cornerSize, new Vector2(-cornerSize, cornerSize), new Vector3(-1f, -1f, 1f));
 
         SetTopOrBottomEdge(topEdge, true, cornerSize, edgeWidth, Vector3.one);
         SetTopOrBottomEdge(bottomEdge, false, cornerSize, edgeWidth, new Vector3(1f, -1f, 1f));
@@ -85,13 +85,13 @@ public sealed class PuzzleOrnateFrameView : MonoBehaviour
 
     private static bool HasSprite(Image image) => image != null && image.sprite != null;
 
-    private static void SetCorner(Image image, Vector2 anchor, Vector2 pivot, float size, Vector3 scale)
+    private static void SetCorner(Image image, Vector2 anchor, Vector2 pivot, float size, Vector2 position, Vector3 scale)
     {
         if (image == null) return;
         var rect = image.rectTransform;
         rect.anchorMin = rect.anchorMax = anchor;
         rect.pivot = pivot;
-        rect.anchoredPosition = Vector2.zero;
+        rect.anchoredPosition = position;
         rect.sizeDelta = Vector2.one * size;
         rect.localScale = scale;
     }
@@ -105,6 +105,7 @@ public sealed class PuzzleOrnateFrameView : MonoBehaviour
         rect.pivot = new Vector2(0.5f, top ? 1f : 0f);
         rect.offsetMin = new Vector2(cornerSize * 0.58f, top ? -edgeWidth : 0f);
         rect.offsetMax = new Vector2(-cornerSize * 0.58f, top ? 0f : edgeWidth);
+        rect.anchoredPosition = new Vector2(0f, top ? 0f : edgeWidth);
         rect.localScale = scale;
     }
 
@@ -117,6 +118,7 @@ public sealed class PuzzleOrnateFrameView : MonoBehaviour
         rect.pivot = new Vector2(left ? 0f : 1f, 0.5f);
         rect.offsetMin = new Vector2(left ? 0f : -edgeWidth, cornerSize * 0.58f);
         rect.offsetMax = new Vector2(left ? edgeWidth : 0f, -cornerSize * 0.58f);
+        rect.anchoredPosition = new Vector2(left ? 0f : -edgeWidth, 0f);
         rect.localScale = scale;
     }
 
@@ -129,6 +131,7 @@ public sealed class PuzzleOrnateFrameView : MonoBehaviour
         rect.pivot = new Vector2(0.5f, top ? 1f : 0f);
         rect.offsetMin = new Vector2(cornerSize * 0.62f, top ? -edgeWidth : edgeWidth - trimWidth);
         rect.offsetMax = new Vector2(-cornerSize * 0.62f, top ? -edgeWidth + trimWidth : edgeWidth);
+        rect.anchoredPosition = new Vector2(0f, top ? 0f : edgeWidth);
         rect.localScale = scale;
     }
 
@@ -141,6 +144,7 @@ public sealed class PuzzleOrnateFrameView : MonoBehaviour
         rect.pivot = new Vector2(left ? 0f : 1f, 0.5f);
         rect.offsetMin = new Vector2(left ? edgeWidth - trimWidth : -edgeWidth, cornerSize * 0.62f);
         rect.offsetMax = new Vector2(left ? edgeWidth : -edgeWidth + trimWidth, -cornerSize * 0.62f);
+        rect.anchoredPosition = new Vector2(left ? 0f : -edgeWidth, 0f);
         rect.localScale = scale;
     }
 
