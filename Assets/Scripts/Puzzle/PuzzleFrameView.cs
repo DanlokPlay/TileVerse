@@ -13,6 +13,7 @@ public sealed class PuzzleFrameView : MonoBehaviour
     [SerializeField] private Image innerShadowImage;
     [SerializeField] private Image goldTrimImage;
     [SerializeField] private Image matImage;
+    [SerializeField] private PuzzleOrnateFrameView ornateFrame;
 
     public RectTransform ContentRoot => contentRoot;
 
@@ -40,6 +41,11 @@ public sealed class PuzzleFrameView : MonoBehaviour
         matImage = matLayerImage;
     }
 
+    public void ConfigureOrnament(PuzzleOrnateFrameView ornament)
+    {
+        ornateFrame = ornament;
+    }
+
     public Vector2 Apply(PuzzleFrameStyle style, Vector2 contentSize)
     {
         if (frameRoot == null)
@@ -47,7 +53,7 @@ public sealed class PuzzleFrameView : MonoBehaviour
             return contentSize;
         }
 
-        var outer = Mathf.Max(1f, style.outerWidth);
+        var outer = Mathf.Max(Mathf.Max(1f, style.outerWidth), ornateFrame != null ? ornateFrame.RequiredOuterWidth : 0f);
         var shadow = Mathf.Max(0f, style.shadowWidth);
         var trim = Mathf.Max(0f, style.trimWidth);
         var matInset = Mathf.Max(0f, style.matWidth);
@@ -74,11 +80,16 @@ public sealed class PuzzleFrameView : MonoBehaviour
         if (innerShadowImage != null) innerShadowImage.color = style.shadowColor;
         if (goldTrimImage != null) goldTrimImage.color = style.trimColor;
         if (matImage != null) matImage.color = style.matColor;
+        ornateFrame?.Apply(outer);
 
         return frameRoot.rect.size;
     }
 
-    public float GetTotalInset(PuzzleFrameStyle style) => style.TotalInset;
+    public float GetTotalInset(PuzzleFrameStyle style)
+    {
+        var outer = Mathf.Max(Mathf.Max(1f, style.outerWidth), ornateFrame != null ? ornateFrame.RequiredOuterWidth : 0f);
+        return outer + Mathf.Max(0f, style.shadowWidth) + Mathf.Max(0f, style.trimWidth) + Mathf.Max(0f, style.matWidth);
+    }
 
     private static void Stretch(RectTransform rect, float inset)
     {

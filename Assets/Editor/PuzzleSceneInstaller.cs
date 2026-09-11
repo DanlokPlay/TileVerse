@@ -1,5 +1,6 @@
 #if UNITY_EDITOR
 using System.Collections.Generic;
+using System.IO;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -10,11 +11,35 @@ using UnityEngine.Video;
 internal static class PuzzleSceneInstaller
 {
     private const string SampleScenePath = "Assets/Scenes/SampleScene.unity";
+    private const string OrnateFrameInstallMarkerPath = "Assets/Editor/TileVerseOrnateFrame.install";
     private static readonly Color Paper = new(0.93f, 0.91f, 0.85f, 1f);
     private static readonly Color Panel = new(0.98f, 0.96f, 0.90f, 0.97f);
     private static readonly Color Ink = new(0.15f, 0.11f, 0.06f, 1f);
     private static readonly Color Gold = new(0.62f, 0.39f, 0.10f, 1f);
     private static Font defaultFont;
+
+    [InitializeOnLoadMethod]
+    private static void InstallOrnateFrameWhenRequested()
+    {
+        var projectRoot = Directory.GetParent(Application.dataPath)?.FullName;
+        if (string.IsNullOrEmpty(projectRoot) || !File.Exists(Path.Combine(projectRoot, OrnateFrameInstallMarkerPath)))
+        {
+            return;
+        }
+
+        EditorApplication.delayCall += () =>
+        {
+            var markerPath = Path.Combine(projectRoot, OrnateFrameInstallMarkerPath);
+            if (!File.Exists(markerPath))
+            {
+                return;
+            }
+
+            File.Delete(markerPath);
+            AssetDatabase.Refresh();
+            InstallCurrentScene();
+        };
+    }
 
     [MenuItem("Tools/TileVerse/Build editable puzzle gallery scene")]
     public static void InstallCurrentScene()
@@ -53,6 +78,27 @@ internal static class PuzzleSceneInstaller
         var mat = CreateImage("Mat", goldTrim.rectTransform, PuzzleFrameStyle.Default.matColor, false);
         var contentRoot = CreateRect("Picture Content", mat.rectTransform);
         contentRoot.gameObject.AddComponent<RectMask2D>();
+
+        var ornamentRoot = CreateRect("Ornate Frame Parts", outerFrame.rectTransform);
+        Stretch(ornamentRoot, 0f);
+        var cornerSprite = LoadFrameSprite("Assets/Art/Frames/OrnateGoldCorner.png");
+        var horizontalEdgeSprite = LoadFrameSprite("Assets/Art/Frames/OrnateGoldHorizontalEdge.png");
+        var verticalEdgeSprite = LoadFrameSprite("Assets/Art/Frames/OrnateGoldVerticalEdge.png");
+        var horizontalTrimSprite = LoadFrameSprite("Assets/Art/Frames/OrnateGoldInnerTrimHorizontal.png");
+        var verticalTrimSprite = LoadFrameSprite("Assets/Art/Frames/OrnateGoldInnerTrimVertical.png");
+        var topLeftCorner = CreateFramePart("Top Left Corner", ornamentRoot, cornerSprite, Image.Type.Simple);
+        var topRightCorner = CreateFramePart("Top Right Corner", ornamentRoot, cornerSprite, Image.Type.Simple);
+        var bottomLeftCorner = CreateFramePart("Bottom Left Corner", ornamentRoot, cornerSprite, Image.Type.Simple);
+        var bottomRightCorner = CreateFramePart("Bottom Right Corner", ornamentRoot, cornerSprite, Image.Type.Simple);
+        var topEdge = CreateFramePart("Top Edge", ornamentRoot, horizontalEdgeSprite, Image.Type.Tiled);
+        var bottomEdge = CreateFramePart("Bottom Edge", ornamentRoot, horizontalEdgeSprite, Image.Type.Tiled);
+        var leftEdge = CreateFramePart("Left Edge", ornamentRoot, verticalEdgeSprite, Image.Type.Tiled);
+        var rightEdge = CreateFramePart("Right Edge", ornamentRoot, verticalEdgeSprite, Image.Type.Tiled);
+        var topInnerTrim = CreateFramePart("Top Inner Trim", ornamentRoot, horizontalTrimSprite, Image.Type.Tiled);
+        var bottomInnerTrim = CreateFramePart("Bottom Inner Trim", ornamentRoot, horizontalTrimSprite, Image.Type.Tiled);
+        var leftInnerTrim = CreateFramePart("Left Inner Trim", ornamentRoot, verticalTrimSprite, Image.Type.Tiled);
+        var rightInnerTrim = CreateFramePart("Right Inner Trim", ornamentRoot, verticalTrimSprite, Image.Type.Tiled);
+
         var guide = CreateRawImage("Puzzle Guide", contentRoot, new Color(1f, 1f, 1f, 0.13f), false);
         Stretch(guide.rectTransform, 0f);
         var videoOverlay = CreateRawImage("Completion Video Overlay", contentRoot, Color.white, false);
@@ -86,6 +132,10 @@ internal static class PuzzleSceneInstaller
         var frameView = GetOrAdd<PuzzleFrameView>(controller.gameObject);
         frameView.Configure(frameTemplate, outerFrame.rectTransform, innerShadow.rectTransform, goldTrim.rectTransform, mat.rectTransform, contentRoot,
             outerFrame, innerShadow, goldTrim, mat);
+        var ornateFrame = GetOrAdd<PuzzleOrnateFrameView>(controller.gameObject);
+        ornateFrame.Configure(ornamentRoot, topLeftCorner, topRightCorner, bottomLeftCorner, bottomRightCorner, topEdge, bottomEdge, leftEdge, rightEdge,
+            topInnerTrim, bottomInnerTrim, leftInnerTrim, rightInnerTrim);
+        frameView.ConfigureOrnament(ornateFrame);
         var boardLayout = GetOrAdd<PuzzleBoardLayout>(controller.gameObject);
         boardLayout.Configure(gameplayRoot, frameTemplate, leftArea, rightArea, frameView);
         var completionVideo = GetOrAdd<PuzzleCompletionVideo>(controller.gameObject);
@@ -212,6 +262,44 @@ internal static class PuzzleSceneInstaller
         image.color = color;
         image.raycastTarget = raycastTarget;
         return image;
+    }
+
+    private static Image CreateFramePart(string name, Transform parent, Sprite sprite, Image.Type type)
+    {
+        var image = CreateImage(name, parent, Color.white, false);
+        image.sprite = sprite;
+        image.type = type;
+        image.preserveAspect = false;
+        return image;
+    }
+
+    private static Sprite LoadFrameSprite(string assetPath)
+    {
+        var importer = AssetImporter.GetAtPath(assetPath) as TextureImporter;
+        if (importer != null)
+        {
+            var mustReimport = importer.textureType != TextureImporterType.Sprite ||
+                               importer.spriteImportMode != SpriteImportMode.Single ||
+                               !importer.alphaIsTransparency ||
+                               importer.mipmapEnabled ||
+                               importer.wrapMode != TextureWrapMode.Repeat ||
+                               importer.spritePixelsPerUnit != 512f ||
+                               importer.maxTextureSize != 2048;
+            if (mustReimport)
+            {
+                importer.textureType = TextureImporterType.Sprite;
+                importer.spriteImportMode = SpriteImportMode.Single;
+                importer.alphaIsTransparency = true;
+                importer.mipmapEnabled = false;
+                importer.wrapMode = TextureWrapMode.Repeat;
+                importer.filterMode = FilterMode.Bilinear;
+                importer.spritePixelsPerUnit = 512f;
+                importer.maxTextureSize = 2048;
+                importer.SaveAndReimport();
+            }
+        }
+
+        return AssetDatabase.LoadAssetAtPath<Sprite>(assetPath);
     }
 
     private static Text CreateText(string name, Transform parent, string value, int fontSize, TextAnchor alignment)
