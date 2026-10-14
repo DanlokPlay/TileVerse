@@ -4,7 +4,7 @@ Approved revision after user review on 2026-10-14. The user confirmed a compact 
 
 ## Frame
 
-Use the complete transparent OrnateGoldMaster artwork as one sliced UI Image, preserving the original corner proportions. Its 320-pixel corner regions include approximately 200-pixel-wide rails and a soft transparent inner fringe; they must not be forced into equally sized squares and strips. Keep the frame immediately around the picture and retain the original transparent outer silhouette.
+Use the complete transparent OrnateGoldMaster artwork as one tiled UI Image, preserving the original corner proportions. Its 320-pixel corner regions include approximately 200-pixel-wide rails and a soft transparent inner fringe; they must not be forced into equally sized squares and strips. Repeat the straight rails at the same uniform scale as the corners, cropping the final repeat rather than stretching the ornament on wide or tall photos. Keep the frame immediately around the picture and retain the original transparent outer silhouette.
 
 User-requested refinement: calibrate the photo opening at 192 source pixels, underneath the opaque gold edge, to eliminate the transparent seam visible on a white background. Keep the full corner proportions for extreme photo formats.
 
@@ -14,7 +14,7 @@ Remove the colored outer backing, inner shadow panel, separate gold trim, mat, a
 
 Use a compact centered settings card with all primary controls visible.
 
-User-requested refinement: increase the menu, its text, and its controls by 25%. Apply the same readable scale to its dialogs. Reduce this scale only when needed to keep the whole panel inside the window with a margin.
+User-requested refinement: increase the menu, its text, and its controls to 140% of the original size (12% larger than the preceding revision). Apply the same readable scale to its dialogs. Reduce this scale only when needed to keep the whole panel inside the window with a margin.
 
 - Plain title and close control; remove marketing title, subtitle, branding, numbered section titles, technical dimensions, repeated hints, and built-in example buttons from the visible menu.
 - Small photo preview and clearly labeled photo/video selection with readable file names.
@@ -24,6 +24,10 @@ User-requested refinement: increase the menu, its text, and its controls by 25%.
 - One Apply action for pending photo/video/form/grid changes; closing leaves the current puzzle intact. Confirm restart only when necessary. Esc first closes the color picker, then the settings menu.
 
 All user-visible text, including button labels, input text, validation messages, and completion messages, uses TextMeshPro. Include a reusable font asset with Cyrillic glyphs. Preserve all fixed menu objects in SampleScene.
+
+## Default media
+
+Use the existing `Assets/Resources/ispu_1.png` and `ispu_1.mp4` as the startup photo/video pair, replacing the Mountains and Glade sample entries. Preserve the source photo aspect without power-of-two import rescaling. Save both references in the scene and use the same pair when no entries have been configured. Selecting different files through settings remains available.
 
 ## Responsibilities and checks
 
