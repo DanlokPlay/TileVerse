@@ -4,13 +4,17 @@ Approved revision after user review on 2026-10-14. The user confirmed a compact 
 
 ## Frame
 
-Use the complete transparent OrnateGoldMaster artwork as one sliced UI Image, preserving the original corner proportions. Its 320-pixel corner regions include 200-pixel-wide rails; they must not be forced into equally sized squares and strips. The photo opening follows the visible 200-pixel rail inset. Keep the frame immediately around the picture and retain the original transparent outer silhouette.
+Use the complete transparent OrnateGoldMaster artwork as one sliced UI Image, preserving the original corner proportions. Its 320-pixel corner regions include approximately 200-pixel-wide rails and a soft transparent inner fringe; they must not be forced into equally sized squares and strips. Keep the frame immediately around the picture and retain the original transparent outer silhouette.
+
+User-requested refinement: calibrate the photo opening at 192 source pixels, underneath the opaque gold edge, to eliminate the transparent seam visible on a white background. Keep the full corner proportions for extreme photo formats.
 
 Remove the colored outer backing, inner shadow panel, separate gold trim, mat, and picture backdrop. Keep only the frame artwork, photo/puzzle guide, pieces, and completion video presentation. No additional brown rectangles, decorative outlines, or padding bands. Frame dimensions continue to follow photo aspect and available window size.
 
 ## Menu
 
 Use a compact centered settings card with all primary controls visible.
+
+User-requested refinement: increase the menu, its text, and its controls by 25%. Apply the same readable scale to its dialogs. Reduce this scale only when needed to keep the whole panel inside the window with a margin.
 
 - Plain title and close control; remove marketing title, subtitle, branding, numbered section titles, technical dimensions, repeated hints, and built-in example buttons from the visible menu.
 - Small photo preview and clearly labeled photo/video selection with readable file names.
