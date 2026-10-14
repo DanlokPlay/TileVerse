@@ -29,6 +29,8 @@ All user-visible text, including button labels, input text, validation messages,
 
 Use the existing `Assets/Resources/ispu_1.png` and `ispu_1.mp4` as the startup photo/video pair, replacing the Mountains and Glade sample entries. Preserve the source photo aspect without power-of-two import rescaling. Save both references in the scene and use the same pair when no entries have been configured. Selecting different files through settings remains available.
 
+Playback fills the same opening as the completed photo with uniform scaling and a centered crop. Do not shrink the full encoded video into the picture: ispu_1 contains side bars in its 1920×1080 frame, while its actual picture matches the photo aspect. Filling the opening crops these side bars and avoids adding top/bottom padding. Other video aspect ratios also use a centered crop without distortion.
+
 ## Responsibilities and checks
 
 FrameView fits the picture and one frame Image. A focused settings view owns UI controls, grid entry validation, selection state, and media labels. A color-picker component owns HSV/HEX conversion and pointer interaction. The game controller retains active/pending gameplay settings and restart decisions. ThemeView applies the background color while keeping menu colors legible.
