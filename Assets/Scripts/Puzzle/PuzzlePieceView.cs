@@ -1,9 +1,11 @@
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.UI;
 
 public sealed class PuzzlePieceView : MonoBehaviour, IBeginDragHandler, IDragHandler, IEndDragHandler, IPointerEnterHandler, IPointerExitHandler
 {
     private PuzzleGameController controller;
+    private Outline outline;
 
     public RectTransform RectTransform { get; private set; }
     public Sprite PieceSprite { get; private set; }
@@ -15,6 +17,7 @@ public sealed class PuzzlePieceView : MonoBehaviour, IBeginDragHandler, IDragHan
     private void Awake()
     {
         RectTransform = (RectTransform)transform;
+        outline = GetComponent<Outline>();
     }
 
     public void Initialize(PuzzleGameController owner, Sprite sprite, int row, int column, Vector2 correctAnchoredPosition)
@@ -29,6 +32,18 @@ public sealed class PuzzlePieceView : MonoBehaviour, IBeginDragHandler, IDragHan
     public void AssignGroup(PuzzlePieceGroup group)
     {
         Group = group;
+    }
+
+    public void SetCorrectPosition(Vector2 position)
+    {
+        CorrectAnchoredPosition = position;
+    }
+
+    public void SetHighlighted(bool highlighted)
+    {
+        if (outline == null) return;
+        outline.effectColor = highlighted ? new Color(0.83f, 0.69f, 0.46f, 0.65f) : new Color(0f, 0f, 0f, 0.3f);
+        outline.effectDistance = highlighted ? new Vector2(1.6f, -1.6f) : new Vector2(1.2f, -1.2f);
     }
 
     public void OnBeginDrag(PointerEventData eventData)

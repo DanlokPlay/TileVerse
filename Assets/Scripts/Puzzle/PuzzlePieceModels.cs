@@ -1,5 +1,11 @@
 using UnityEngine;
 
+public enum PuzzlePieceMode
+{
+    Classic,
+    Tiles
+}
+
 public sealed class PuzzleSourceImage
 {
     public string DisplayName { get; }

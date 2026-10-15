@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using System.IO;
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 using UnityEngine.Video;
@@ -10,24 +12,31 @@ public sealed class PuzzleCompletionVideo : MonoBehaviour
     [SerializeField] private AudioSource audioSource;
     [SerializeField] private RawImage overlay;
     [SerializeField] private CanvasGroup overlayGroup;
-    [SerializeField] private Text statusText;
+    [SerializeField] private TMP_Text statusText;
+    [SerializeField] private GameObject statusPanel;
     [SerializeField] private float fadeDuration = 0.45f;
+    [SerializeField, Min(1f)] private float prepareTimeout = 15f;
 
     private RenderTexture runtimeTexture;
     private Coroutine fadeRoutine;
+    private Coroutine loadRoutine;
+    private bool paused;
+    private bool resumePlayback;
 
     public void Configure(
         VideoPlayer player,
         AudioSource source,
         RawImage image,
         CanvasGroup group,
-        Text status)
+        TMP_Text status,
+        GameObject messagePanel = null)
     {
         videoPlayer = player;
         audioSource = source;
         overlay = image;
         overlayGroup = group;
         statusText = status;
+        statusPanel = messagePanel;
         ResetPresentation();
     }
 
@@ -41,6 +50,7 @@ public sealed class PuzzleCompletionVideo : MonoBehaviour
         StopPlayback();
         if (runtimeTexture != null)
         {
+            runtimeTexture.Release();
             Destroy(runtimeTexture);
         }
     }
@@ -62,17 +72,22 @@ public sealed class PuzzleCompletionVideo : MonoBehaviour
             return;
         }
 
+        if (entry.VideoClip == null && !IsUsableVideoPath(entry.CustomVideoPath))
+        {
+            ShowStatus("Видео недоступно. Выберите другое в меню Esc.");
+            return;
+        }
+
         ConfigureRenderTarget();
         videoPlayer.isLooping = entry.LoopVideo;
-        videoPlayer.audioOutputMode = VideoAudioOutputMode.AudioSource;
-        videoPlayer.EnableAudioTrack(0, audioSource != null);
-        if (audioSource != null)
-        {
-            videoPlayer.SetTargetAudioSource(0, audioSource);
-        }
+        // Fill the photo opening uniformly; encoded side bars fall outside it.
+        videoPlayer.aspectRatio = VideoAspectRatio.FitOutside;
+        videoPlayer.waitForFirstFrame = true;
+        videoPlayer.sendFrameReadyEvents = true;
 
         videoPlayer.prepareCompleted += HandlePrepared;
         videoPlayer.errorReceived += HandleError;
+        videoPlayer.frameReady += HandleFirstFrame;
         if (entry.VideoClip != null)
         {
             videoPlayer.source = VideoSource.VideoClip;
@@ -84,11 +99,20 @@ public sealed class PuzzleCompletionVideo : MonoBehaviour
             videoPlayer.url = entry.CustomVideoPath;
         }
 
-        videoPlayer.Prepare();
+        videoPlayer.audioOutputMode = VideoAudioOutputMode.AudioSource;
+        videoPlayer.controlledAudioTrackCount = 1;
+        loadRoutine = StartCoroutine(WaitForFirstFrame());
+        try { videoPlayer.Prepare(); }
+        catch (Exception exception) { HandleError(videoPlayer, exception.Message); }
     }
 
     public void StopPlayback()
     {
+        if (loadRoutine != null)
+        {
+            StopCoroutine(loadRoutine);
+            loadRoutine = null;
+        }
         if (fadeRoutine != null)
         {
             StopCoroutine(fadeRoutine);
@@ -99,10 +123,26 @@ public sealed class PuzzleCompletionVideo : MonoBehaviour
         {
             videoPlayer.prepareCompleted -= HandlePrepared;
             videoPlayer.errorReceived -= HandleError;
-            if (videoPlayer.isPlaying)
-            {
-                videoPlayer.Stop();
-            }
+            videoPlayer.frameReady -= HandleFirstFrame;
+            videoPlayer.Stop();
+        }
+        paused = false;
+        resumePlayback = false;
+    }
+
+    public void SetPaused(bool value)
+    {
+        if (paused == value || videoPlayer == null) return;
+        paused = value;
+        if (paused)
+        {
+            resumePlayback = videoPlayer.isPlaying;
+            if (resumePlayback) videoPlayer.Pause();
+        }
+        else if (resumePlayback)
+        {
+            resumePlayback = false;
+            videoPlayer.Play();
         }
     }
 
@@ -124,12 +164,17 @@ public sealed class PuzzleCompletionVideo : MonoBehaviour
         {
             statusText.gameObject.SetActive(false);
         }
+        if (statusPanel != null) statusPanel.SetActive(false);
     }
 
     private void ConfigureRenderTarget()
     {
-        var width = Mathf.Max(256, Screen.width);
-        var height = Mathf.Max(256, Screen.height);
+        var size = overlay.rectTransform.rect.size;
+        var canvas = overlay.canvas;
+        var scale = canvas != null ? canvas.scaleFactor : 1f;
+        var limit = Mathf.Min(1f, 2048f / Mathf.Max(1f, size.x * scale, size.y * scale));
+        var width = Mathf.Max(1, Mathf.RoundToInt(size.x * scale * limit));
+        var height = Mathf.Max(1, Mathf.RoundToInt(size.y * scale * limit));
         if (runtimeTexture == null || runtimeTexture.width != width || runtimeTexture.height != height)
         {
             if (runtimeTexture != null)
@@ -143,6 +188,10 @@ public sealed class PuzzleCompletionVideo : MonoBehaviour
                 name = "PuzzleCompletionVideo"
             };
             runtimeTexture.Create();
+            var previous = RenderTexture.active;
+            RenderTexture.active = runtimeTexture;
+            GL.Clear(true, true, Color.black);
+            RenderTexture.active = previous;
         }
 
         videoPlayer.renderMode = VideoRenderMode.RenderTexture;
@@ -152,7 +201,25 @@ public sealed class PuzzleCompletionVideo : MonoBehaviour
 
     private void HandlePrepared(VideoPlayer player)
     {
-        player.Play();
+        player.prepareCompleted -= HandlePrepared;
+        if (player.audioTrackCount > 0)
+        {
+            player.EnableAudioTrack(0, audioSource != null);
+            if (audioSource != null) player.SetTargetAudioSource(0, audioSource);
+        }
+        if (paused) resumePlayback = true;
+        else player.Play();
+    }
+
+    private void HandleFirstFrame(VideoPlayer player, long frame)
+    {
+        if (loadRoutine != null)
+        {
+            StopCoroutine(loadRoutine);
+            loadRoutine = null;
+        }
+        player.frameReady -= HandleFirstFrame;
+        player.sendFrameReadyEvents = false;
         if (overlay != null)
         {
             overlay.enabled = true;
@@ -168,14 +235,43 @@ public sealed class PuzzleCompletionVideo : MonoBehaviour
     {
         StopPlayback();
         ResetPresentation();
-        ShowStatus($"Не удалось запустить видео: {message}");
+        Debug.LogWarning($"TileVerse: video playback failed: {message}");
+        ShowStatus("Видео недоступно. Выберите другое в меню Esc.");
+    }
+
+    private static bool IsUsableVideoPath(string path)
+    {
+        if (Uri.TryCreate(path, UriKind.Absolute, out var uri) && !uri.IsFile) return true;
+        try
+        {
+            var file = new FileInfo(uri != null && uri.IsFile ? uri.LocalPath : path);
+            return file.Exists && file.Length > 0;
+        }
+        catch (Exception error) when (error is IOException || error is UnauthorizedAccessException || error is ArgumentException || error is NotSupportedException)
+        {
+            return false;
+        }
+    }
+
+    private IEnumerator WaitForFirstFrame()
+    {
+        var elapsed = 0f;
+        while (elapsed < prepareTimeout && overlay != null && !overlay.enabled)
+        {
+            if (!paused) elapsed += Time.unscaledDeltaTime;
+            yield return null;
+        }
+        loadRoutine = null;
+        if (overlay != null && !overlay.enabled) HandleError(videoPlayer, "No first frame received before timeout.");
     }
 
     private IEnumerator FadeIn()
     {
         var duration = Mathf.Max(0.01f, fadeDuration);
-        for (var elapsed = 0f; elapsed < duration; elapsed += Time.unscaledDeltaTime)
+        for (var elapsed = 0f; elapsed < duration;)
         {
+            if (paused) { yield return null; continue; }
+            elapsed += Time.unscaledDeltaTime;
             if (overlayGroup != null)
             {
                 overlayGroup.alpha = Mathf.Clamp01(elapsed / duration);
@@ -188,6 +284,7 @@ public sealed class PuzzleCompletionVideo : MonoBehaviour
         {
             overlayGroup.alpha = 1f;
         }
+        fadeRoutine = null;
     }
 
     private void ShowStatus(string message)
@@ -199,5 +296,6 @@ public sealed class PuzzleCompletionVideo : MonoBehaviour
 
         statusText.text = message;
         statusText.gameObject.SetActive(true);
+        if (statusPanel != null) statusPanel.SetActive(true);
     }
 }

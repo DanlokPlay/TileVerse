@@ -9,3 +9,9 @@ Design: ../specs/2026-10-14-gallery-puzzle-settings-design.md
 5. Rebuild SampleScene through Unity, run integration validation, render previews, inspect output, and repair any failures.
 
 The writing-plans skill is not installed in the available skill directories; this explicit plan follows the repository's existing plan format.
+
+## Verification completed — 2026-10-14
+
+Unity 6000.3.13f1 compiled the runtime/editor assemblies and rebuilt SampleScene successfully. The Play Mode validator passed 86 assertions covering generation, restart/cancel, exact background colors, tile margins, portrait reflow and merged groups, completion, MP4 decoding, playback pause/resume, aspect preservation, and invalid-video fallback. Game, settings, portrait, video, and fallback renders were inspected under `Logs/GalleryPreview`.
+
+Visual review also corrected nested frame insets, joined the ornament rails beneath the corners, added a black video matte, and placed completion messages inside the picture area.

@@ -42,10 +42,13 @@ public sealed class PuzzleBoardLayout : MonoBehaviour
             return Vector2.zero;
         }
 
-        var sideWidth = Mathf.Max(canvasSize.x * minimumSideWorkspaceRatio, 120f);
+        var sideWidth = Mathf.Min(Mathf.Max(canvasSize.x * minimumSideWorkspaceRatio, 120f), canvasSize.x * 0.25f);
         var totalInset = frameView.GetTotalInset(frameStyle);
-        var maxContentWidth = Mathf.Max(180f, canvasSize.x - sideWidth * 2f - horizontalGap * 2f - totalInset * 2f);
-        var maxContentHeight = Mathf.Max(180f, canvasSize.y - verticalPadding * 2f - totalInset * 2f);
+        var availableWidth = Mathf.Max(1f, canvasSize.x - sideWidth * 2f - horizontalGap * 2f);
+        var availableHeight = Mathf.Max(1f, canvasSize.y - verticalPadding * 2f);
+        var frameScale = Mathf.Min(1f, availableWidth / (totalInset * 2f + 180f), availableHeight / (totalInset * 2f + 180f));
+        var maxContentWidth = Mathf.Max(1f, availableWidth - totalInset * 2f * frameScale);
+        var maxContentHeight = Mathf.Max(1f, availableHeight - totalInset * 2f * frameScale);
         var imageAspect = texture.width / (float)Mathf.Max(1, texture.height);
         var contentSize = FitAspect(imageAspect, maxContentWidth, maxContentHeight);
 
@@ -53,7 +56,7 @@ public sealed class PuzzleBoardLayout : MonoBehaviour
         boardStage.anchorMax = new Vector2(0.5f, 0.5f);
         boardStage.pivot = new Vector2(0.5f, 0.5f);
         boardStage.anchoredPosition = Vector2.zero;
-        boardStage.sizeDelta = frameView.Apply(frameStyle, contentSize);
+        boardStage.sizeDelta = frameView.Apply(frameStyle, contentSize, frameScale);
 
         ApplySpawnArea(leftPiecesArea, true, sideWidth, canvasSize.y - verticalPadding * 2f);
         ApplySpawnArea(rightPiecesArea, false, sideWidth, canvasSize.y - verticalPadding * 2f);

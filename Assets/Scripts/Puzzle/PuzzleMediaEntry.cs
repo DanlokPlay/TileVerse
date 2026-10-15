@@ -26,10 +26,17 @@ public sealed class PuzzleMediaEntry
     {
     }
 
-    public PuzzleMediaEntry(string name, Texture2D sourceImage)
+    public PuzzleMediaEntry(string name, Texture2D sourceImage, VideoClip sourceVideo = null)
     {
         displayName = name;
         image = sourceImage;
+        videoClip = sourceVideo;
+    }
+
+    public static PuzzleMediaEntry LoadDefault()
+    {
+        var photo = Resources.Load<Texture2D>("ispu_1");
+        return photo != null ? new PuzzleMediaEntry("ispu_1", photo, Resources.Load<VideoClip>("ispu_1")) : null;
     }
 
     public PuzzleMediaEntry Copy()

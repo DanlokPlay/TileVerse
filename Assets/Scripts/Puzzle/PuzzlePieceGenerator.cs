@@ -2,9 +2,10 @@ using UnityEngine;
 
 public static class PuzzlePieceGenerator
 {
-    public static PuzzlePieceShape[,] GenerateShapes(int rows, int columns)
+    public static PuzzlePieceShape[,] GenerateShapes(int rows, int columns, PuzzlePieceMode mode = PuzzlePieceMode.Classic)
     {
         var shapes = new PuzzlePieceShape[rows, columns];
+        if (mode == PuzzlePieceMode.Tiles) return shapes;
 
         for (var row = 0; row < rows; row++)
         {

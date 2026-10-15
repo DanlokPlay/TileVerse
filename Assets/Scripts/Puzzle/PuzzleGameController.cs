@@ -14,17 +14,15 @@ using UnityEditor;
 
 public sealed class PuzzleGameController : MonoBehaviour
 {
-    private const int MinGridSize = 2;
-    private const int MaxGridSize = 8;
     private const float FullPieceScale = 1f;
+    private const float GroupHoverScale = 1.04f;
     private const float SpawnPadding = 16f;
+    public const float DefaultSidePieceScale = 0.9f;
 
     [Header("Built-in artwork")]
-    [SerializeField] private Texture2D mountainsTexture;
-    [SerializeField] private Texture2D gladeTexture;
     [SerializeField] private List<PuzzleMediaEntry> mediaEntries = new();
     [Header("Piece presentation")]
-    [SerializeField] [Range(0.45f, 1f)] private float sideAreaPieceScale = 0.72f;
+    [SerializeField] [Range(0.45f, 1f)] private float sideAreaPieceScale = DefaultSidePieceScale;
 
     [Header("Gameplay scene objects")]
     [SerializeField] private Canvas gameCanvas;
@@ -40,23 +38,10 @@ public sealed class PuzzleGameController : MonoBehaviour
     [SerializeField] private PuzzleThemeView themeView;
 
     [Header("Settings overlay")]
-    [SerializeField] private Canvas settingsCanvas;
-    [SerializeField] private Text selectedImageText;
-    [SerializeField] private Text settingsStatusText;
-    [SerializeField] private Text horizontalValueText;
-    [SerializeField] private Text verticalValueText;
-    [SerializeField] private Slider horizontalSlider;
-    [SerializeField] private Slider verticalSlider;
-    [SerializeField] private Button builtInButtonA;
-    [SerializeField] private Button builtInButtonB;
-    [SerializeField] private Button customImageButton;
-    [SerializeField] private Button customVideoButton;
-    [SerializeField] private Button themeButton;
-    [SerializeField] private Button applySettingsButton;
-    [SerializeField] private Button closeSettingsButton;
-    [SerializeField] private GameObject resetConfirmationDialog;
-    [SerializeField] private Button resetConfirmButton;
-    [SerializeField] private Button resetCancelButton;
+    [SerializeField] private PuzzleSettingsView settingsView;
+    [SerializeField] private Color backgroundColor = Color.black;
+    [SerializeField] private bool previewEnabled = true;
+    [SerializeField] private bool lockPlacedPieces = true;
 
     private readonly List<PuzzlePieceView> activePieces = new();
     private readonly List<PuzzlePieceGroup> activeGroups = new();
@@ -65,7 +50,9 @@ public sealed class PuzzleGameController : MonoBehaviour
     private PuzzleMediaEntry pendingMedia;
     private PuzzlePieceShape[,] currentShapes;
     private PuzzlePieceGroup draggingGroup;
-    private Vector2 lastPointerLocalPoint;
+    private PuzzlePieceGroup hoveredGroup;
+    private PuzzlePieceView draggedPiece;
+    private Vector2 dragGrabPoint;
     private PuzzleLayoutMetrics currentLayout;
     private int activeColumns = 4;
     private int activeRows = 4;
@@ -73,25 +60,35 @@ public sealed class PuzzleGameController : MonoBehaviour
     private bool uiWired;
     private bool settingsOpen;
     private bool waitingForResetConfirmation;
-    private bool darkTheme;
+    private PuzzlePieceMode activePieceMode;
+    private PuzzlePieceMode pendingPieceMode;
+    private Vector2 lastCanvasSize;
+    private float currentSidePieceScale = DefaultSidePieceScale;
+
+    public bool PreviewEnabled => previewEnabled;
+    public bool LockPlacedPieces => lockPlacedPieces;
 
     private void Awake()
     {
         EnsureEventSystem();
         EnsureMediaEntries();
         WireUi();
-        RefreshGridLabels();
         activeMedia ??= mediaEntries.Count > 0 ? mediaEntries[0].Copy() : null;
-        if (settingsCanvas != null) settingsCanvas.gameObject.SetActive(false);
-        if (resetConfirmationDialog != null) resetConfirmationDialog.SetActive(false);
-        themeView?.Apply(darkTheme);
+        if (settingsView != null)
+        {
+            settingsView.Canvas.gameObject.SetActive(false);
+            settingsView.ShowConfirmation(false);
+        }
+        themeView?.Apply(backgroundColor);
     }
 
     private void Start() => StartConfiguredPuzzle();
 
     private void Update()
     {
+        RefreshResponsiveLayout();
         if (!WasEscapePressed()) return;
+        if (settingsOpen && settingsView != null && settingsView.CloseTransient()) return;
         if (waitingForResetConfirmation) { HideResetConfirmation(); return; }
         if (settingsOpen) CloseSettings(false); else OpenSettings();
     }
@@ -106,50 +103,34 @@ public sealed class PuzzleGameController : MonoBehaviour
     }
 
     public void ConfigureScene(
-        Canvas gameplayCanvas, RectTransform gameplayRoot, RectTransform dynamicPiecesLayer, RectTransform guideRect, RawImage guideImage,
-        RectTransform leftArea, RectTransform rightArea, PuzzleBoardLayout layout, PuzzleFrameView frame, PuzzleCompletionVideo video, PuzzleThemeView theme,
-        Canvas menuCanvas, Text selectedLabel, Text statusLabel, Text horizontalLabel, Text verticalLabel, Slider horizontal, Slider vertical,
-        Button builtInA, Button builtInB, Button customImage, Button customVideo, Button themeToggle, Button applyButton, Button closeButton,
-        GameObject confirmation, Button confirmationAccept, Button confirmationCancel, List<PuzzleMediaEntry> configuredMedia)
+        Canvas gameplayCanvas, RectTransform gameplayRoot, RectTransform dynamicPiecesLayer,
+        RectTransform guideRect, RawImage guideImage, RectTransform leftArea, RectTransform rightArea,
+        PuzzleBoardLayout layout, PuzzleFrameView frame, PuzzleCompletionVideo video,
+        PuzzleThemeView theme, PuzzleSettingsView settings, List<PuzzleMediaEntry> configuredMedia)
     {
-        gameCanvas = gameplayCanvas; gameCanvasRoot = gameplayRoot; piecesLayer = dynamicPiecesLayer; boardGuideRect = guideRect; boardGuideImage = guideImage;
-        leftPiecesArea = leftArea; rightPiecesArea = rightArea; boardLayout = layout; frameView = frame; completionVideo = video; themeView = theme;
-        settingsCanvas = menuCanvas; selectedImageText = selectedLabel; settingsStatusText = statusLabel; horizontalValueText = horizontalLabel;
-        verticalValueText = verticalLabel; horizontalSlider = horizontal; verticalSlider = vertical; builtInButtonA = builtInA; builtInButtonB = builtInB;
-        customImageButton = customImage; customVideoButton = customVideo; themeButton = themeToggle; applySettingsButton = applyButton;
-        closeSettingsButton = closeButton; resetConfirmationDialog = confirmation; resetConfirmButton = confirmationAccept; resetCancelButton = confirmationCancel;
+        gameCanvas = gameplayCanvas; gameCanvasRoot = gameplayRoot; piecesLayer = dynamicPiecesLayer;
+        boardGuideRect = guideRect; boardGuideImage = guideImage; leftPiecesArea = leftArea; rightPiecesArea = rightArea;
+        boardLayout = layout; frameView = frame; completionVideo = video; themeView = theme; settingsView = settings;
         mediaEntries = configuredMedia ?? new List<PuzzleMediaEntry>(); uiWired = false;
     }
+
+    public List<PuzzleMediaEntry> CopyConfiguredMedia() => mediaEntries.ConvertAll(entry => entry.Copy());
+
+    public void ConfigurePiecePresentation(float scale) => sideAreaPieceScale = Mathf.Clamp(scale, 0.45f, 1f);
 
     private void EnsureMediaEntries()
     {
         if (mediaEntries.Count > 0) return;
-        if (mountainsTexture != null) mediaEntries.Add(new PuzzleMediaEntry("Горы", mountainsTexture));
-        if (gladeTexture != null) mediaEntries.Add(new PuzzleMediaEntry("Поляна", gladeTexture));
-        if (mediaEntries.Count > 0) return;
-        mediaEntries.Add(new PuzzleMediaEntry("Закатная долина", PuzzleTextureFactory.CreateSunsetTexture(1200, 1200)) { IsRuntimeImage = true });
-        mediaEntries.Add(new PuzzleMediaEntry("Геометрический ритм", PuzzleTextureFactory.CreateGeometryTexture(1200, 1200)) { IsRuntimeImage = true });
+        var defaultMedia = PuzzleMediaEntry.LoadDefault();
+        if (defaultMedia != null) mediaEntries.Add(defaultMedia);
     }
 
     private void WireUi()
     {
-        if (uiWired) return;
-        ConfigureGridSlider(horizontalSlider, activeColumns); ConfigureGridSlider(verticalSlider, activeRows);
-        if (horizontalSlider != null) horizontalSlider.onValueChanged.AddListener(_ => RefreshGridLabels());
-        if (verticalSlider != null) verticalSlider.onValueChanged.AddListener(_ => RefreshGridLabels());
-        builtInButtonA?.onClick.AddListener(() => SelectBuiltInEntry(0)); builtInButtonB?.onClick.AddListener(() => SelectBuiltInEntry(1));
-        customImageButton?.onClick.AddListener(LoadCustomImage); customVideoButton?.onClick.AddListener(LoadCustomVideo);
-        themeButton?.onClick.AddListener(ToggleTheme); applySettingsButton?.onClick.AddListener(ApplySettings);
-        closeSettingsButton?.onClick.AddListener(() => CloseSettings(false)); resetConfirmButton?.onClick.AddListener(ConfirmReset); resetCancelButton?.onClick.AddListener(HideResetConfirmation);
-        SetButtonLabel(builtInButtonA, mediaEntries.Count > 0 ? mediaEntries[0].DisplayName : "Картина 1");
-        SetButtonLabel(builtInButtonB, mediaEntries.Count > 1 ? mediaEntries[1].DisplayName : "Картина 2");
-        SetButtonLabel(themeButton, "Тема: светлая"); uiWired = true;
-    }
-
-    private static void ConfigureGridSlider(Slider slider, int value)
-    {
-        if (slider == null) return;
-        slider.minValue = MinGridSize; slider.maxValue = MaxGridSize; slider.wholeNumbers = true; slider.value = Mathf.Clamp(value, MinGridSize, MaxGridSize);
+        if (uiWired || settingsView == null) return;
+        settingsView.Bind(LoadCustomImage, LoadCustomVideo, ApplySettings, () => CloseSettings(false),
+            ConfirmReset, HideResetConfirmation, SelectPieceMode, SetBackground, SetPreview, SetPlacementLock, QuitApplication);
+        uiWired = true;
     }
 
     private void StartConfiguredPuzzle()
@@ -160,7 +141,12 @@ public sealed class PuzzleGameController : MonoBehaviour
         if (gameCanvas != null) gameCanvas.gameObject.SetActive(true);
         var contentSize = boardLayout.Apply(selectedTexture, activeMedia.FrameStyle); Canvas.ForceUpdateCanvases();
         if (contentSize.x <= 0f || contentSize.y <= 0f) { ShowSettingsStatus("Не удалось рассчитать размер игрового поля.", true); return; }
-        currentLayout = CalculateLayoutMetrics(activeRows, activeColumns); currentShapes = PuzzlePieceGenerator.GenerateShapes(activeRows, activeColumns); UpdateBoardGuide();
+        UpdateBoardGuide();
+        currentLayout = CalculateLayoutMetrics(activeRows, activeColumns);
+        UpdateSidePieceScale();
+        currentShapes = PuzzlePieceGenerator.GenerateShapes(activeRows, activeColumns, activePieceMode);
+        lastCanvasSize = gameCanvasRoot.rect.size;
+        FitSettingsPanel();
         var startPositions = BuildStartPositions(activeRows * activeColumns); var startIndex = 0;
         for (var row = 0; row < activeRows; row++)
         for (var column = 0; column < activeColumns; column++)
@@ -171,7 +157,7 @@ public sealed class PuzzleGameController : MonoBehaviour
             pieceObject.transform.SetParent(piecesLayer, false);
             var pieceRect = (RectTransform)pieceObject.transform;
             pieceRect.sizeDelta = new Vector2(sprite.rect.width * currentLayout.UiScale, sprite.rect.height * currentLayout.UiScale);
-            pieceRect.anchoredPosition = startPositions[startIndex++]; pieceRect.localScale = Vector3.one * sideAreaPieceScale;
+            pieceRect.anchoredPosition = startPositions[startIndex++]; pieceRect.localScale = Vector3.one * currentSidePieceScale;
             var image = pieceObject.GetComponent<Image>(); image.sprite = sprite; image.raycastTarget = true; image.preserveAspect = true; image.useSpriteMesh = true; image.alphaHitTestMinimumThreshold = 0.05f;
             var outline = pieceObject.GetComponent<Outline>(); outline.effectColor = new Color(0f, 0f, 0f, 0.3f); outline.effectDistance = new Vector2(1.2f, -1.2f);
             var view = pieceObject.GetComponent<PuzzlePieceView>(); view.Initialize(this, sprite, row, column, GetPieceCorrectPosition(slice));
@@ -181,40 +167,70 @@ public sealed class PuzzleGameController : MonoBehaviour
 
     public void BeginDrag(PuzzlePieceView piece, PointerEventData eventData)
     {
-        if (puzzleCompleted || piece?.Group == null || piecesLayer == null) return;
-        draggingGroup = piece.Group; SetGroupScale(draggingGroup, FullPieceScale); draggingGroup.BringToFront();
-        if (RectTransformUtility.ScreenPointToLocalPointInRectangle(piecesLayer, eventData.position, eventData.pressEventCamera, out var point)) lastPointerLocalPoint = point;
+        if (settingsOpen || puzzleCompleted || piece?.Group == null || piecesLayer == null || (lockPlacedPieces && piece.Group.IsPlaced)) return;
+        if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(piecesLayer, eventData.position, eventData.pressEventCamera, out var point)) return;
+        var grabbedPoint = piece.RectTransform.InverseTransformPoint(piecesLayer.TransformPoint(point));
+        ClearHover();
+        draggingGroup = piece.Group;
+        draggedPiece = piece;
+        dragGrabPoint = grabbedPoint;
+        draggingGroup.SetPlaced(false);
+        SetGroupScale(draggingGroup, FullPieceScale);
+        draggingGroup.MoveBy(point - ConvertLocalPoint(piece.RectTransform, piecesLayer, grabbedPoint));
+        draggingGroup.SetHighlighted(true);
+        draggingGroup.BringToFront();
     }
 
     public void Drag(PuzzlePieceView piece, PointerEventData eventData)
     {
-        if (draggingGroup == null || piece == null || piece.Group != draggingGroup) return;
+        if (draggingGroup == null || draggedPiece == null || piece == null || piece.Group != draggingGroup) return;
         if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(piecesLayer, eventData.position, eventData.pressEventCamera, out var point)) return;
-        draggingGroup.MoveBy(point - lastPointerLocalPoint); lastPointerLocalPoint = point;
+        draggingGroup.MoveBy(point - ConvertLocalPoint(draggedPiece.RectTransform, piecesLayer, dragGrabPoint));
     }
 
     public void EndDrag(PuzzlePieceView piece)
     {
-        if (draggingGroup == null || piece == null || piece.Group != draggingGroup) { draggingGroup = null; return; }
-        var group = draggingGroup; draggingGroup = null; var resolved = ResolvePlacement(group); ApplyGroupRestingScale(resolved); EvaluateCompletion();
+        if (draggingGroup == null || piece == null || piece.Group != draggingGroup) { draggingGroup = null; draggedPiece = null; return; }
+        var group = draggingGroup;
+        draggingGroup = null;
+        draggedPiece = null;
+        KeepGroupOnScreen(group);
+        var resolved = ResolvePlacement(group);
+        ApplyGroupRestingScale(resolved);
+        resolved.SetHighlighted(false);
+        if (!resolved.IsPlaced) KeepGroupOnScreen(resolved);
+        EvaluateCompletion();
     }
 
     public void BeginHover(PuzzlePieceView piece)
     {
-        if (puzzleCompleted || piece?.Group == null || piece.Group == draggingGroup) return;
-        SetGroupScale(piece.Group, FullPieceScale); piece.Group.BringToFront();
+        if (settingsOpen || puzzleCompleted || piece?.Group == null || draggingGroup != null || (lockPlacedPieces && piece.Group.IsPlaced)) return;
+        if (hoveredGroup == piece.Group) return;
+        ClearHover();
+        hoveredGroup = piece.Group;
+        SetGroupScale(hoveredGroup, hoveredGroup.Members.Count == 1 && !hoveredGroup.IsPlaced ? FullPieceScale : GroupHoverScale);
+        piece.Group.SetHighlighted(true);
+        piece.Group.BringToFront();
     }
 
     public void EndHover(PuzzlePieceView piece)
     {
-        if (puzzleCompleted || piece?.Group == null || piece.Group == draggingGroup) return;
-        ApplyGroupRestingScale(piece.Group);
+        if (piece?.Group == null || piece.Group != hoveredGroup || draggingGroup != null) return;
+        ClearHover();
+    }
+
+    private void ClearHover()
+    {
+        if (hoveredGroup == null) return;
+        ApplyGroupRestingScale(hoveredGroup);
+        hoveredGroup.SetHighlighted(false);
+        hoveredGroup = null;
     }
 
     private PuzzlePieceGroup ResolvePlacement(PuzzlePieceGroup group)
     {
         var current = group;
-        for (var i = 0; i < 12; i++)
+        for (var i = 0; i < activePieces.Count; i++)
         {
             var changed = TrySnapGroupToBoard(current);
             if (TryMergeWithNeighbor(current, out var merged)) { current = merged; changed = true; }
@@ -234,7 +250,11 @@ public sealed class PuzzleGameController : MonoBehaviour
             if (delta.sqrMagnitude < bestDistance) { bestDistance = delta.sqrMagnitude; bestDelta = delta; }
         }
         if (bestDistance == float.MaxValue) return false;
-        group.MoveBy(bestDelta); return true;
+        var changed = !group.IsPlaced || bestDelta.sqrMagnitude > 0.000001f;
+        group.MoveBy(bestDelta);
+        group.SetPlaced(true);
+        SetGroupScale(group, FullPieceScale);
+        return changed;
     }
 
     private bool TryMergeWithNeighbor(PuzzlePieceGroup movingGroup, out PuzzlePieceGroup mergedGroup)
@@ -254,7 +274,24 @@ public sealed class PuzzleGameController : MonoBehaviour
             }
         }
         if (bestTarget == null) { mergedGroup = movingGroup; return false; }
-        movingGroup.MoveBy(bestCorrection); bestTarget.Absorb(movingGroup); bestTarget.BringToFront(); activeGroups.Remove(movingGroup); mergedGroup = bestTarget; return true;
+        SetGroupScale(movingGroup, FullPieceScale);
+        SetGroupScale(bestTarget, FullPieceScale);
+        if (movingGroup.IsPlaced && !bestTarget.IsPlaced)
+        {
+            bestTarget.MoveBy(-bestCorrection);
+            movingGroup.Absorb(bestTarget);
+            activeGroups.Remove(bestTarget);
+            mergedGroup = movingGroup;
+        }
+        else
+        {
+            movingGroup.MoveBy(bestCorrection);
+            bestTarget.Absorb(movingGroup);
+            activeGroups.Remove(movingGroup);
+            mergedGroup = bestTarget;
+        }
+        mergedGroup.BringToFront();
+        return true;
     }
 
     private void EvaluateCompletion()
@@ -262,45 +299,69 @@ public sealed class PuzzleGameController : MonoBehaviour
         if (activePieces.Count == 0 || activeGroups.Count != 1) return;
         foreach (var piece in activePieces)
             if ((piece.RectTransform.anchoredPosition - piece.CorrectAnchoredPosition).sqrMagnitude > 0.25f) return;
-        puzzleCompleted = true; SetGroupScale(activeGroups[0], FullPieceScale); completionVideo?.Play(activeMedia);
+        puzzleCompleted = true; SetGroupScale(activeGroups[0], FullPieceScale);
+        boardGuideImage.color = Color.white;
+        foreach (var piece in activePieces) piece.GetComponent<Image>().enabled = false;
+        completionVideo?.Play(activeMedia);
     }
 
     private void OpenSettings()
     {
-        if (settingsCanvas == null) return;
-        EnsureMediaEntries(); settingsOpen = true; pendingMedia = activeMedia != null ? activeMedia.Copy() : mediaEntries[0].Copy();
-        if (horizontalSlider != null) horizontalSlider.value = activeColumns; if (verticalSlider != null) verticalSlider.value = activeRows;
-        RefreshGridLabels(); RefreshSettingsLabels(); settingsCanvas.gameObject.SetActive(true);
-        ShowSettingsStatus("Настройте картину и пазл. Изменения фото, видео или сетки потребуют подтверждения.");
+        if (settingsView == null) return;
+        ClearHover();
+        EnsureMediaEntries();
+        settingsOpen = true;
+        pendingMedia = activeMedia != null ? activeMedia.Copy() : mediaEntries[0].Copy();
+        pendingPieceMode = activePieceMode;
+        if (draggingGroup != null)
+        {
+            ApplyGroupRestingScale(draggingGroup);
+            draggingGroup.SetHighlighted(false);
+            KeepGroupOnScreen(draggingGroup);
+        }
+        foreach (var group in activeGroups) group.SetHighlighted(false);
+        draggingGroup = null;
+        draggedPiece = null;
+        completionVideo?.SetPaused(true);
+        settingsView.Canvas.gameObject.SetActive(true);
+        settingsView.SetPending(activeColumns, activeRows, pendingPieceMode, backgroundColor);
+        settingsView.SetGameplayPreferences(previewEnabled, lockPlacedPieces);
+        settingsView.Fit();
+        RefreshSettingsLabels();
     }
 
     private void CloseSettings(bool keepPending)
     {
         if (!keepPending) { DestroyPendingRuntimeImageIfUnused(); pendingMedia = null; }
         settingsOpen = false; waitingForResetConfirmation = false;
-        if (resetConfirmationDialog != null) resetConfirmationDialog.SetActive(false);
-        if (settingsCanvas != null) settingsCanvas.gameObject.SetActive(false);
-    }
-
-    private void SelectBuiltInEntry(int index)
-    {
-        if (index < 0 || index >= mediaEntries.Count) return;
-        DestroyPendingRuntimeImageIfUnused(); pendingMedia = mediaEntries[index].Copy(); RefreshSettingsLabels();
-        ShowSettingsStatus($"Выбрана картина «{pendingMedia.DisplayName}». Видео задаётся в Inspector или кнопкой ниже.");
+        if (settingsView != null)
+        {
+            settingsView.CloseTransient();
+            settingsView.ShowConfirmation(false);
+            settingsView.Canvas.gameObject.SetActive(false);
+        }
+        completionVideo?.SetPaused(false);
     }
 
     private void LoadCustomImage()
     {
         var path = NativeImagePicker.OpenImageFile();
         if (string.IsNullOrWhiteSpace(path)) { ShowSettingsStatus("Выбор фотографии отменён."); return; }
+        Texture2D texture = null;
         try
         {
-            var texture = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = Path.GetFileNameWithoutExtension(path), filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp };
-            if (!texture.LoadImage(File.ReadAllBytes(path), false)) { Destroy(texture); ShowSettingsStatus("Не удалось открыть выбранное изображение.", true); return; }
+            var bytes = File.ReadAllBytes(path);
+            texture = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = Path.GetFileNameWithoutExtension(path), filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp };
+            if (!texture.LoadImage(bytes, false)) { Destroy(texture); ShowSettingsStatus("Не удалось открыть выбранное изображение.", true); return; }
             DestroyPendingRuntimeImageIfUnused(); pendingMedia = new PuzzleMediaEntry(texture.name, texture) { IsRuntimeImage = true }; RefreshSettingsLabels();
             ShowSettingsStatus("Фотография выбрана. Выберите видео для её оживления или примените пазл без видео.");
         }
-        catch (Exception exception) { ShowSettingsStatus($"Ошибка загрузки фотографии: {exception.Message}", true); }
+        catch (Exception exception)
+        {
+            if (texture != null) Destroy(texture);
+            Debug.LogWarning($"TileVerse: image loading failed: {exception.Message}");
+            ShowSettingsStatus("Не удалось загрузить фото. Проверьте файл и выберите его снова.", true);
+        }
     }
 
     private void LoadCustomVideo()
@@ -308,21 +369,61 @@ public sealed class PuzzleGameController : MonoBehaviour
         if (pendingMedia == null) { ShowSettingsStatus("Сначала выберите фотографию.", true); return; }
         var path = NativeVideoPicker.OpenVideoFile();
         if (string.IsNullOrWhiteSpace(path)) { ShowSettingsStatus("Выбор видео отменён."); return; }
-        pendingMedia.SetCustomVideoPath(path); RefreshSettingsLabels(); ShowSettingsStatus("Видео связано с выбранной фотографией для этого запуска.");
+        pendingMedia.SetCustomVideoPath(path); RefreshSettingsLabels(); ShowSettingsStatus("Фото и видео готовы. Нажмите «Применить».");
     }
 
-    private void ToggleTheme()
+    private void SetBackground(Color color)
     {
-        darkTheme = !darkTheme; themeView?.Apply(darkTheme); SetButtonLabel(themeButton, darkTheme ? "Тема: тёмная" : "Тема: светлая");
+        color.a = 1f;
+        backgroundColor = color;
+        themeView?.Apply(color);
+        settingsView?.SetBackground(color);
+    }
+
+    private void SetPreview(bool enabled)
+    {
+        previewEnabled = enabled;
+        RefreshGuideVisibility();
+        settingsView?.SetGameplayPreferences(previewEnabled, lockPlacedPieces);
+    }
+
+    private void SetPlacementLock(bool enabled)
+    {
+        ClearHover();
+        lockPlacedPieces = enabled;
+        foreach (var group in activeGroups) group.SetHighlighted(false);
+        settingsView?.SetGameplayPreferences(previewEnabled, lockPlacedPieces);
+    }
+
+    private void QuitApplication()
+    {
+        completionVideo?.StopPlayback();
+#if UNITY_EDITOR
+        EditorApplication.isPlaying = false;
+#else
+        Application.Quit();
+#endif
+    }
+
+    private void RefreshGuideVisibility()
+    {
+        if (boardGuideImage != null)
+            boardGuideImage.color = new Color(1f, 1f, 1f, puzzleCompleted ? 1f : previewEnabled ? 0.13f : 0f);
+    }
+
+    private void SelectPieceMode(PuzzlePieceMode mode)
+    {
+        pendingPieceMode = mode;
+        settingsView?.SetMode(mode);
     }
 
     private void ApplySettings()
     {
         if (pendingMedia?.Image == null) { ShowSettingsStatus("Выберите фотографию для пазла.", true); return; }
-        var columns = Mathf.Clamp(horizontalSlider != null ? Mathf.RoundToInt(horizontalSlider.value) : activeColumns, MinGridSize, MaxGridSize);
-        var rows = Mathf.Clamp(verticalSlider != null ? Mathf.RoundToInt(verticalSlider.value) : activeRows, MinGridSize, MaxGridSize);
-        if (SameMedia(activeMedia, pendingMedia) && columns == activeColumns && rows == activeRows) { CloseSettings(false); return; }
-        if (activePieces.Count > 0 && !puzzleCompleted) { waitingForResetConfirmation = true; if (resetConfirmationDialog != null) resetConfirmationDialog.SetActive(true); return; }
+        var columns = settingsView != null ? settingsView.Columns : activeColumns;
+        var rows = settingsView != null ? settingsView.Rows : activeRows;
+        if (SameMedia(activeMedia, pendingMedia) && columns == activeColumns && rows == activeRows && pendingPieceMode == activePieceMode) { CloseSettings(false); return; }
+        if (activePieces.Count > 0 && !puzzleCompleted) { waitingForResetConfirmation = true; settingsView.ShowConfirmation(true); return; }
         CommitPendingSettings();
     }
 
@@ -333,41 +434,109 @@ public sealed class PuzzleGameController : MonoBehaviour
         if (pendingMedia == null) return;
         if (!SameImageReference(activeMedia, pendingMedia)) DestroyRuntimeEntryImage(activeMedia);
         activeMedia = pendingMedia; pendingMedia = null;
-        activeColumns = Mathf.Clamp(horizontalSlider != null ? Mathf.RoundToInt(horizontalSlider.value) : activeColumns, MinGridSize, MaxGridSize);
-        activeRows = Mathf.Clamp(verticalSlider != null ? Mathf.RoundToInt(verticalSlider.value) : activeRows, MinGridSize, MaxGridSize);
+        activePieceMode = pendingPieceMode;
+        activeColumns = settingsView != null ? settingsView.Columns : activeColumns;
+        activeRows = settingsView != null ? settingsView.Rows : activeRows;
         CloseSettings(true); StartConfiguredPuzzle();
     }
 
     private void HideResetConfirmation()
     {
-        waitingForResetConfirmation = false; if (resetConfirmationDialog != null) resetConfirmationDialog.SetActive(false);
+        waitingForResetConfirmation = false;
+        settingsView?.ShowConfirmation(false);
     }
 
-    private void RefreshSettingsLabels()
+    private void RefreshSettingsLabels() => settingsView?.RefreshMedia(pendingMedia);
+    private void FitSettingsPanel() => settingsView?.Fit();
+
+    private void UpdateSidePieceScale()
     {
-        if (selectedImageText != null && pendingMedia != null)
-            selectedImageText.text = $"Картина: {pendingMedia.DisplayName}\nВидео: {(pendingMedia.HasVideo ? "выбрано" : "не выбрано")}";
+        var availableWidth = Mathf.Min(leftPiecesArea.rect.width, rightPiecesArea.rect.width) - SpawnPadding * 2f;
+        var availableHeight = Mathf.Min(leftPiecesArea.rect.height, rightPiecesArea.rect.height) - SpawnPadding * 2f;
+        currentSidePieceScale = Mathf.Max(0.01f, Mathf.Min(sideAreaPieceScale,
+            availableWidth / Mathf.Max(1f, currentLayout.MaxPieceUiSize.x),
+            availableHeight / Mathf.Max(1f, currentLayout.MaxPieceUiSize.y)));
     }
 
-    private void RefreshGridLabels()
+    private void RefreshResponsiveLayout()
     {
-        if (horizontalValueText != null && horizontalSlider != null) horizontalValueText.text = Mathf.RoundToInt(horizontalSlider.value).ToString();
-        if (verticalValueText != null && verticalSlider != null) verticalValueText.text = Mathf.RoundToInt(verticalSlider.value).ToString();
+        if (gameCanvasRoot == null) return;
+        var size = gameCanvasRoot.rect.size;
+        if ((size - lastCanvasSize).sqrMagnitude < 0.5f) return;
+        ClearHover();
+        FitSettingsPanel();
+        if (selectedTexture == null || activePieces.Count == 0) { lastCanvasSize = size; return; }
+
+        var previousSize = lastCanvasSize;
+        draggingGroup = null;
+        draggedPiece = null;
+        boardLayout.Apply(selectedTexture, activeMedia.FrameStyle);
+        Canvas.ForceUpdateCanvases();
+        currentLayout = CalculateLayoutMetrics(activeRows, activeColumns);
+        UpdateSidePieceScale();
+        var ratio = new Vector2(size.x / Mathf.Max(1f, previousSize.x), size.y / Mathf.Max(1f, previousSize.y));
+        foreach (var group in activeGroups)
+        {
+            var first = group.Members[0];
+            var wasSnapped = (first.RectTransform.anchoredPosition - first.CorrectAnchoredPosition).sqrMagnitude <= 0.25f;
+            var anchorPosition = Vector2.Scale(first.RectTransform.anchoredPosition, ratio);
+            var anchorSlice = PuzzlePieceGenerator.CalculateSliceBounds(first.Row, first.Column, activeRows, activeColumns, selectedTexture.width, selectedTexture.height);
+            var offset = wasSnapped ? Vector2.zero : anchorPosition - GetPieceCorrectPosition(anchorSlice);
+            foreach (var piece in group.Members)
+            {
+                var slice = PuzzlePieceGenerator.CalculateSliceBounds(piece.Row, piece.Column, activeRows, activeColumns, selectedTexture.width, selectedTexture.height);
+                piece.SetCorrectPosition(GetPieceCorrectPosition(slice));
+                piece.RectTransform.sizeDelta = piece.PieceSprite.rect.size * currentLayout.UiScale;
+                piece.RectTransform.anchoredPosition = piece.CorrectAnchoredPosition + offset;
+            }
+            group.SetPlaced(wasSnapped);
+            ApplyGroupRestingScale(group);
+            KeepGroupOnScreen(group);
+        }
+        lastCanvasSize = size;
+    }
+
+    private void KeepGroupOnScreen(PuzzlePieceGroup group)
+    {
+        var min = Vector2.one * float.PositiveInfinity;
+        var max = Vector2.one * float.NegativeInfinity;
+        foreach (var piece in group.Members)
+        {
+            var half = piece.RectTransform.sizeDelta * (piece.RectTransform.localScale.x * 0.5f);
+            min = Vector2.Min(min, piece.RectTransform.anchoredPosition - half);
+            max = Vector2.Max(max, piece.RectTransform.anchoredPosition + half);
+        }
+        var bounds = piecesLayer.rect;
+        var delta = Vector2.zero;
+        // Pieces and fragments may remain partly offscreen. Recover them only
+        // when an entire axis is no longer visible, leaving a reachable edge.
+        var visible = 32f / Mathf.Max(0.01f, gameCanvas.scaleFactor);
+        if (max.x <= bounds.xMin) delta.x = bounds.xMin + visible - max.x;
+        else if (min.x >= bounds.xMax) delta.x = bounds.xMax - visible - min.x;
+        if (max.y <= bounds.yMin) delta.y = bounds.yMin + visible - max.y;
+        else if (min.y >= bounds.yMax) delta.y = bounds.yMax - visible - min.y;
+        group.MoveBy(delta);
     }
 
     private void UpdateBoardGuide()
     {
         boardGuideRect.anchorMin = Vector2.zero; boardGuideRect.anchorMax = Vector2.one; boardGuideRect.offsetMin = Vector2.zero; boardGuideRect.offsetMax = Vector2.zero; boardGuideRect.SetAsFirstSibling();
-        boardGuideImage.texture = selectedTexture; boardGuideImage.color = new Color(1f, 1f, 1f, 0.13f); boardGuideImage.raycastTarget = false;
+        boardGuideImage.texture = selectedTexture;
+        RefreshGuideVisibility();
+        boardGuideImage.raycastTarget = false;
     }
 
     private PuzzleLayoutMetrics CalculateLayoutMetrics(int rows, int columns)
     {
         var size = boardGuideRect.rect.size; var maxCellWidth = Mathf.Ceil(selectedTexture.width / (float)columns); var maxCellHeight = Mathf.Ceil(selectedTexture.height / (float)rows);
-        var minCell = Mathf.Min(selectedTexture.width / (float)columns, selectedTexture.height / (float)rows); var tab = Mathf.CeilToInt(minCell * 0.38f + 4f);
-        var maxPiece = new Vector2(maxCellWidth + tab * 2f, maxCellHeight + tab * 2f); var scale = Mathf.Max(0.06f, Mathf.Min(size.x / selectedTexture.width, size.y / selectedTexture.height));
+        var minCell = Mathf.Min(selectedTexture.width / (float)columns, selectedTexture.height / (float)rows);
+        var tab = activePieceMode == PuzzlePieceMode.Tiles ? 0 : Mathf.CeilToInt(minCell * 0.38f + 4f);
+        var maxPiece = new Vector2(maxCellWidth + tab * 2f, maxCellHeight + tab * 2f); var scale = Mathf.Max(0.0001f, Mathf.Min(size.x / selectedTexture.width, size.y / selectedTexture.height));
         var cellUi = minCell * scale;
-        return new PuzzleLayoutMetrics(scale, new Vector2(selectedTexture.width * scale, selectedTexture.height * scale), maxPiece * scale, Mathf.Max(12f, minCell * 0.16f * scale), tab, Mathf.Max(26f, cellUi * 0.45f), Mathf.Max(22f, cellUi * 0.36f), Vector2.zero);
+        var pixelsPerUnit = Mathf.Max(0.01f, gameCanvas.scaleFactor);
+        var boardSnap = Mathf.Clamp(cellUi * 0.12f, 10f / pixelsPerUnit, 22f / pixelsPerUnit);
+        var neighborSnap = Mathf.Clamp(cellUi * 0.10f, 8f / pixelsPerUnit, 20f / pixelsPerUnit);
+        return new PuzzleLayoutMetrics(scale, new Vector2(selectedTexture.width * scale, selectedTexture.height * scale), maxPiece * scale, Mathf.Max(12f, minCell * 0.16f * scale), tab, boardSnap, neighborSnap, Vector2.zero);
     }
 
     private List<Vector2> BuildStartPositions(int count)
@@ -381,7 +550,7 @@ public sealed class PuzzleGameController : MonoBehaviour
     private Vector2 BuildSpawnPosition(RectTransform area, List<Vector2> existing)
     {
         if (area == null) return Vector2.zero;
-        var piece = currentLayout.MaxPieceUiSize * sideAreaPieceScale;
+        var piece = currentLayout.MaxPieceUiSize * currentSidePieceScale;
         var half = piece * 0.5f;
         var bounds = area.rect;
         var minX = bounds.xMin + half.x + SpawnPadding;
@@ -407,12 +576,27 @@ public sealed class PuzzleGameController : MonoBehaviour
         return ConvertLocalPoint(boardGuideRect, piecesLayer, new Vector2(x * currentLayout.UiScale, y * currentLayout.UiScale));
     }
 
-    private void ApplyGroupRestingScale(PuzzlePieceGroup group) => SetGroupScale(group, IsGroupInSideArea(group) ? sideAreaPieceScale : FullPieceScale);
+    private void ApplyGroupRestingScale(PuzzlePieceGroup group) =>
+        SetGroupScale(group, group.Members.Count == 1 && !group.IsPlaced && IsGroupInSideArea(group) ? currentSidePieceScale : FullPieceScale);
 
     private void SetGroupScale(PuzzlePieceGroup group, float scale)
     {
         if (group == null) return;
-        foreach (var member in group.Members) if (member != null) member.RectTransform.localScale = Vector3.one * Mathf.Clamp(scale, 0.1f, FullPieceScale);
+        if (group.Members.Count > 1 || group.IsPlaced) scale = Mathf.Max(FullPieceScale, scale);
+        scale = Mathf.Clamp(scale, 0.01f, GroupHoverScale);
+        if (group.Members.Count == 0) return;
+        var previousScale = group.Members[0].RectTransform.localScale.x;
+        if (Mathf.Approximately(previousScale, scale)) return;
+        var center = Vector2.zero;
+        foreach (var member in group.Members) center += member.RectTransform.anchoredPosition;
+        center /= group.Members.Count;
+        var ratio = scale / Mathf.Max(0.01f, previousScale);
+        foreach (var member in group.Members)
+        {
+            // Scale spacing and artwork around one pivot so connected seams stay closed.
+            member.RectTransform.anchoredPosition = center + (member.RectTransform.anchoredPosition - center) * ratio;
+            member.RectTransform.localScale = Vector3.one * scale;
+        }
     }
 
     private bool IsGroupInSideArea(PuzzlePieceGroup group)
@@ -427,6 +611,8 @@ public sealed class PuzzleGameController : MonoBehaviour
 
     private void ClearExistingPuzzle()
     {
+        hoveredGroup = null;
+        draggedPiece = null;
         foreach (var piece in activePieces)
         {
             if (piece == null) continue;
@@ -439,18 +625,14 @@ public sealed class PuzzleGameController : MonoBehaviour
 
     private void ShowSettingsStatus(string message, bool isError = false)
     {
-        if (settingsStatusText == null) return;
-        settingsStatusText.text = message; settingsStatusText.color = isError ? new Color(0.72f, 0.12f, 0.10f, 1f) : darkTheme ? new Color(0.92f, 0.88f, 0.75f, 1f) : new Color(0.22f, 0.17f, 0.09f, 1f);
+        settingsView?.SetStatus(isError ? message : string.Empty, isError);
     }
 
     private bool HasGameBindings() => gameCanvas != null && gameCanvasRoot != null && piecesLayer != null && boardGuideRect != null && boardGuideImage != null && leftPiecesArea != null && rightPiecesArea != null && boardLayout != null && frameView != null;
     private static bool AreNeighbors(PuzzlePieceView first, PuzzlePieceView second) => Mathf.Abs(first.Row - second.Row) + Mathf.Abs(first.Column - second.Column) == 1;
     private static Vector2 ConvertLocalPoint(RectTransform from, RectTransform to, Vector2 point) => to.InverseTransformPoint(from.TransformPoint(point));
 
-    private static void SetButtonLabel(Button button, string label)
-    {
-        if (button == null) return; var text = button.GetComponentInChildren<Text>(true); if (text != null) text.text = label;
-    }
+
 
     private static bool SameMedia(PuzzleMediaEntry first, PuzzleMediaEntry second) => first == null || second == null ? first == second : first.Image == second.Image && first.VideoClip == second.VideoClip && string.Equals(first.CustomVideoPath, second.CustomVideoPath, StringComparison.Ordinal) && first.LoopVideo == second.LoopVideo;
     private static bool SameImageReference(PuzzleMediaEntry first, PuzzleMediaEntry second) => first != null && second != null && first.Image == second.Image;
@@ -493,17 +675,4 @@ public sealed class PuzzleGameController : MonoBehaviour
 #endif
     }
 
-#if UNITY_EDITOR
-    private void OnValidate()
-    {
-        TryAssignBuiltInTexture(ref mountainsTexture, "Горы"); TryAssignBuiltInTexture(ref gladeTexture, "Поляна");
-    }
-
-    private static void TryAssignBuiltInTexture(ref Texture2D texture, string name)
-    {
-        if (texture != null) return;
-        var guids = AssetDatabase.FindAssets($"{name} t:Texture2D", new[] { "Assets" });
-        if (guids.Length > 0) texture = AssetDatabase.LoadAssetAtPath<Texture2D>(AssetDatabase.GUIDToAssetPath(guids[0]));
-    }
-#endif
 }

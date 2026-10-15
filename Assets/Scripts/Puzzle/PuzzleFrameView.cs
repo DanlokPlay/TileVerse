@@ -1,106 +1,38 @@
 using UnityEngine;
-using UnityEngine.UI;
 
 public sealed class PuzzleFrameView : MonoBehaviour
 {
     [SerializeField] private RectTransform frameRoot;
-    [SerializeField] private RectTransform outerFrame;
-    [SerializeField] private RectTransform innerShadow;
-    [SerializeField] private RectTransform goldTrim;
-    [SerializeField] private RectTransform mat;
     [SerializeField] private RectTransform contentRoot;
-    [SerializeField] private Image outerFrameImage;
-    [SerializeField] private Image innerShadowImage;
-    [SerializeField] private Image goldTrimImage;
-    [SerializeField] private Image matImage;
     [SerializeField] private PuzzleOrnateFrameView ornateFrame;
 
     public RectTransform ContentRoot => contentRoot;
+    public RectTransform FrameRoot => frameRoot;
 
-    public void Configure(
-        RectTransform root,
-        RectTransform outer,
-        RectTransform shadow,
-        RectTransform trim,
-        RectTransform matRect,
-        RectTransform content,
-        Image outerImage,
-        Image shadowImage,
-        Image trimImage,
-        Image matLayerImage)
+    public void Configure(RectTransform root, RectTransform content, PuzzleOrnateFrameView ornament)
     {
         frameRoot = root;
-        outerFrame = outer;
-        innerShadow = shadow;
-        goldTrim = trim;
-        mat = matRect;
         contentRoot = content;
-        outerFrameImage = outerImage;
-        innerShadowImage = shadowImage;
-        goldTrimImage = trimImage;
-        matImage = matLayerImage;
-    }
-
-    public void ConfigureOrnament(PuzzleOrnateFrameView ornament)
-    {
         ornateFrame = ornament;
     }
 
-    public Vector2 Apply(PuzzleFrameStyle style, Vector2 contentSize)
+    public Vector2 Apply(PuzzleFrameStyle style, Vector2 contentSize, float frameScale = 1f)
     {
-        if (frameRoot == null)
-        {
-            return contentSize;
-        }
-
-        var outer = Mathf.Max(Mathf.Max(1f, style.outerWidth), ornateFrame != null ? ornateFrame.RequiredOuterWidth : 0f);
-        var shadow = Mathf.Max(0f, style.shadowWidth);
-        var trim = Mathf.Max(0f, style.trimWidth);
-        var matInset = Mathf.Max(0f, style.matWidth);
-        var totalInset = outer + shadow + trim + matInset;
-
-        frameRoot.SetSizeWithCurrentAnchors(RectTransform.Axis.Horizontal, contentSize.x + totalInset * 2f);
-        frameRoot.SetSizeWithCurrentAnchors(RectTransform.Axis.Vertical, contentSize.y + totalInset * 2f);
-
-        Stretch(outerFrame, 0f);
-        Stretch(innerShadow, outer);
-        Stretch(goldTrim, outer + shadow);
-        Stretch(mat, outer + shadow + trim);
-
+        if (frameRoot == null) return contentSize;
+        // Keep room for both original corners even when the photo is very narrow.
+        var minimumOpening = 2f * PuzzleOrnateFrameView.CornerPixels / PuzzleOrnateFrameView.PictureInsetPixels - 2f;
+        var inset = Mathf.Min(GetTotalInset(style) * frameScale, Mathf.Min(contentSize.x, contentSize.y) / minimumOpening);
+        frameRoot.sizeDelta = contentSize + Vector2.one * inset * 2f;
         if (contentRoot != null)
         {
-            contentRoot.anchorMin = new Vector2(0.5f, 0.5f);
-            contentRoot.anchorMax = new Vector2(0.5f, 0.5f);
+            contentRoot.anchorMin = contentRoot.anchorMax = new Vector2(0.5f, 0.5f);
             contentRoot.pivot = new Vector2(0.5f, 0.5f);
             contentRoot.anchoredPosition = Vector2.zero;
             contentRoot.sizeDelta = contentSize;
         }
-
-        if (outerFrameImage != null) outerFrameImage.color = style.outerColor;
-        if (innerShadowImage != null) innerShadowImage.color = style.shadowColor;
-        if (goldTrimImage != null) goldTrimImage.color = style.trimColor;
-        if (matImage != null) matImage.color = style.matColor;
-        ornateFrame?.Apply(outer);
-
+        ornateFrame?.Apply(inset);
         return frameRoot.rect.size;
     }
 
-    public float GetTotalInset(PuzzleFrameStyle style)
-    {
-        var outer = Mathf.Max(Mathf.Max(1f, style.outerWidth), ornateFrame != null ? ornateFrame.RequiredOuterWidth : 0f);
-        return outer + Mathf.Max(0f, style.shadowWidth) + Mathf.Max(0f, style.trimWidth) + Mathf.Max(0f, style.matWidth);
-    }
-
-    private static void Stretch(RectTransform rect, float inset)
-    {
-        if (rect == null)
-        {
-            return;
-        }
-
-        rect.anchorMin = Vector2.zero;
-        rect.anchorMax = Vector2.one;
-        rect.offsetMin = Vector2.one * inset;
-        rect.offsetMax = Vector2.one * -inset;
-    }
+    public float GetTotalInset(PuzzleFrameStyle style) => ornateFrame != null ? ornateFrame.RequiredOuterWidth : 0f;
 }

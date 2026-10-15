@@ -6,6 +6,14 @@ public sealed class PuzzlePieceGroup
     private readonly List<PuzzlePieceView> members = new();
 
     public IReadOnlyList<PuzzlePieceView> Members => members;
+    public bool IsPlaced { get; private set; }
+
+    public void SetPlaced(bool placed) => IsPlaced = placed;
+
+    public void SetHighlighted(bool highlighted)
+    {
+        foreach (var member in members) member.SetHighlighted(highlighted);
+    }
 
     public PuzzlePieceGroup(PuzzlePieceView firstPiece)
     {
@@ -30,6 +38,7 @@ public sealed class PuzzlePieceGroup
 
     public void Absorb(PuzzlePieceGroup otherGroup)
     {
+        IsPlaced |= otherGroup.IsPlaced;
         foreach (var member in otherGroup.members)
         {
             AddMember(member);
