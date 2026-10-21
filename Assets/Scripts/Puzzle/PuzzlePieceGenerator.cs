@@ -1,3 +1,5 @@
+using System.Buffers;
+using Unity.Collections;
 using UnityEngine;
 
 public static class PuzzlePieceGenerator
@@ -39,58 +41,64 @@ public static class PuzzlePieceGenerator
     {
         var textureWidth = slice.Width + tabMargin * 2;
         var textureHeight = slice.Height + tabMargin * 2;
-        var pixels = new Color[textureWidth * textureHeight];
-        var mask = new bool[textureWidth * textureHeight];
-
-        for (var y = 0; y < textureHeight; y++)
-        {
-            for (var x = 0; x < textureWidth; x++)
-            {
-                var inside = IsInsidePieceMask(x + 0.5f, y + 0.5f, slice.Width, slice.Height, tabMargin, shape);
-                var index = y * textureWidth + x;
-                mask[index] = inside;
-
-                if (!inside)
-                {
-                    pixels[index] = Color.clear;
-                    continue;
-                }
-
-                var sampleX = slice.XMin - tabMargin + x;
-                var sampleY = slice.YMin - tabMargin + y;
-                pixels[index] = SampleSourcePixel(sourceTexture, sampleX, sampleY);
-            }
-        }
-
-        ShadeMaskBorder(pixels, mask, textureWidth, textureHeight);
-
         var pieceTexture = new Texture2D(textureWidth, textureHeight, TextureFormat.RGBA32, false)
         {
             filterMode = FilterMode.Bilinear,
             wrapMode = TextureWrapMode.Clamp,
             name = $"Piece_{slice.XMin}_{slice.YMin}"
         };
+        // Write directly into the readable texture: UI alpha hit testing needs
+        // this CPU copy, but a second managed Color[] copy is unnecessary.
+        var pixels = pieceTexture.GetPixelData<Color32>(0);
+        var sourcePixels = sourceTexture.format == TextureFormat.RGBA32
+            ? sourceTexture.GetPixelData<Color32>(0) : default;
+        var sourceWidth = sourceTexture.width;
+        var sourceHeight = sourceTexture.height;
+        var mask = ArrayPool<bool>.Shared.Rent(pixels.Length);
 
-        pieceTexture.SetPixels(pixels);
-        pieceTexture.Apply();
-
-        return Sprite.Create(
-            pieceTexture,
-            new Rect(0f, 0f, textureWidth, textureHeight),
-            new Vector2(0.5f, 0.5f),
-            100f,
-            0,
-            SpriteMeshType.Tight);
-    }
-
-    private static Color SampleSourcePixel(Texture2D texture, int x, int y)
-    {
-        if (x < 0 || x >= texture.width || y < 0 || y >= texture.height)
+        try
         {
-            return Color.clear;
-        }
+            for (var y = 0; y < textureHeight; y++)
+            {
+                for (var x = 0; x < textureWidth; x++)
+                {
+                    var inside = IsInsidePieceMask(x + 0.5f, y + 0.5f, slice.Width, slice.Height, tabMargin, shape);
+                    var index = y * textureWidth + x;
+                    mask[index] = inside;
 
-        return texture.GetPixel(x, y);
+                    if (!inside)
+                    {
+                        pixels[index] = default;
+                        continue;
+                    }
+
+                    var sampleX = slice.XMin - tabMargin + x;
+                    var sampleY = slice.YMin - tabMargin + y;
+                    pixels[index] = sampleX < 0 || sampleX >= sourceWidth || sampleY < 0 || sampleY >= sourceHeight
+                        ? default
+                        : sourcePixels.IsCreated ? sourcePixels[sampleY * sourceWidth + sampleX]
+                        : (Color32)sourceTexture.GetPixel(sampleX, sampleY);
+                }
+            }
+
+            ShadeMaskBorder(pixels, mask, textureWidth, textureHeight);
+
+            pieceTexture.Apply(false, false);
+
+            return Sprite.Create(
+                pieceTexture,
+                new Rect(0f, 0f, textureWidth, textureHeight),
+                new Vector2(0.5f, 0.5f),
+                100f,
+                0,
+                SpriteMeshType.Tight);
+        }
+        catch
+        {
+            Object.Destroy(pieceTexture);
+            throw;
+        }
+        finally { ArrayPool<bool>.Shared.Return(mask); }
     }
 
     private static bool IsInsidePieceMask(float x, float y, int cellWidth, int cellHeight, int tabMargin, PuzzlePieceShape shape)
@@ -171,7 +179,7 @@ public static class PuzzlePieceGenerator
         return value >= Mathf.Min(start, end) && value <= Mathf.Max(start, end);
     }
 
-    private static void ShadeMaskBorder(Color[] pixels, bool[] mask, int width, int height)
+    private static void ShadeMaskBorder(NativeArray<Color32> pixels, bool[] mask, int width, int height)
     {
         for (var y = 0; y < height; y++)
         {

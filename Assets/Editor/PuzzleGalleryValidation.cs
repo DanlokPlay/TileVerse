@@ -21,6 +21,10 @@ internal static class PuzzleGalleryValidation
     private const string SessionKey = "TileVerse.GalleryValidation";
     private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
     private static readonly List<string> checks = new();
+    private static readonly List<string> performance = new();
+    private static double playbackRequestedAt;
+    private static string firstFrameLabel;
+    private static int preparedTargetId;
     private static PuzzleGameController controller;
     private static Camera camera;
     private static RenderTexture captureTarget;
@@ -48,6 +52,7 @@ internal static class PuzzleGalleryValidation
         SessionState.SetBool(SessionKey, true);
         SessionState.SetInt(SessionKey + ".result", 1);
         SessionState.SetBool(SessionKey + ".exitPending", false);
+        SessionState.SetBool(SessionKey + ".exitFrameIntact", false);
         Directory.CreateDirectory(Output);
         EditorApplication.isPlaying = true;
     }
@@ -61,17 +66,30 @@ internal static class PuzzleGalleryValidation
             Application.runInBackground = true;
             stage = 0;
             checks.Clear();
+            performance.Clear();
             nextUpdate = EditorApplication.timeSinceStartup + 2;
             deadline = nextUpdate + 90;
             EditorApplication.update += Tick;
+        }
+        else if (state == PlayModeStateChange.ExitingPlayMode && SessionState.GetBool(SessionKey + ".exitPending", false))
+        {
+            var ending = controller != null ? Get<PuzzleCompletionVideo>(controller, "completionVideo") : null;
+            var visible = ending != null ? Get<RawImage>(ending, "overlay") : null;
+            SessionState.SetBool(SessionKey + ".exitFrameIntact", visible != null && visible.enabled && visible.texture != null &&
+                visible.texture == Get<RenderTexture>(ending, "runtimeTexture") && Get<CanvasGroup>(ending, "overlayGroup").alpha > 0.99f);
         }
         else if (state == PlayModeStateChange.EnteredEditMode)
         {
             if (SessionState.GetBool(SessionKey + ".exitPending", false))
             {
                 SessionState.SetBool(SessionKey + ".exitPending", false);
-                Check("Settings Exit button stops Play Mode in the editor", true);
-                Finish(true, "All gallery checks passed.");
+                if (SessionState.GetBool(SessionKey + ".exitFrameIntact", false))
+                {
+                    Check("Exit keeps the video frame intact until scene teardown", true);
+                    Check("Settings Exit button stops Play Mode in the editor", true);
+                    Finish(true, "All gallery checks passed.");
+                }
+                else Finish(false, "Exit cleared the video before scene teardown.");
             }
             SessionState.SetBool(SessionKey, false);
             if (Application.isBatchMode) EditorApplication.Exit(SessionState.GetInt(SessionKey + ".result", 1));
@@ -80,6 +98,12 @@ internal static class PuzzleGalleryValidation
 
     private static void Tick()
     {
+        // Batch validation has no visible Game view to drive coroutines.
+        if (Application.isBatchMode)
+        {
+            EditorApplication.isPaused = false;
+            EditorApplication.QueuePlayerLoopUpdate();
+        }
         if (EditorApplication.timeSinceStartup < nextUpdate) return;
         try
         {
@@ -167,8 +191,63 @@ internal static class PuzzleGalleryValidation
                     Check("Default ispu_1 clip decodes after puzzle completion", defaultPlayer.source == VideoSource.VideoClip && defaultPlayer.clip.name == "ispu_1" && defaultPlayer.isPlaying);
                     CheckDefaultVideoEdges(Get<RenderTexture>(defaultVideo, "runtimeTexture"));
                     Capture("completion-ispu.png");
-                    Invoke(controller, "OpenSettings");
+                    BeginWarmVideoValidation();
                     stage = 7;
+                    nextUpdate = EditorApplication.timeSinceStartup + 0.05;
+                    break;
+                case 7:
+                    var warm = Get<PuzzleCompletionVideo>(controller, "completionVideo");
+                    var warmPlayer = Get<VideoPlayer>(warm, "videoPlayer");
+                    if (!warmPlayer.isPrepared) break;
+                    Check("Near-completion preparation stays silent and hidden", !warmPlayer.isPlaying && !Get<RawImage>(warm, "overlay").enabled);
+                    Check("Prepared video has no polling coroutine", Get<Coroutine>(warm, "loadRoutine") == null);
+                    preparedTargetId = Get<RenderTexture>(warm, "runtimeTexture").GetInstanceID();
+                    warm.Prepare(Get<PuzzleMediaEntry>(controller, "activeMedia"));
+                    Check("Repeated preparation reuses the ready player and texture", warmPlayer.isPrepared && Get<RenderTexture>(warm, "runtimeTexture").GetInstanceID() == preparedTargetId);
+                    Invoke(controller, "OpenSettings");
+                    warmPlayer.frameReady += RecordFirstFrame;
+                    firstFrameLabel = "Warm fixture";
+                    playbackRequestedAt = EditorApplication.timeSinceStartup;
+                    var remaining = Get<List<PuzzlePieceView>>(controller, "activePieces");
+                    foreach (var piece in remaining) piece.RectTransform.anchoredPosition = piece.CorrectAnchoredPosition;
+                    foreach (var piece in remaining) Invoke(controller, "ResolvePlacement", piece.Group);
+                    Invoke(controller, "EvaluateCompletion");
+                    Check("Prepared completion preserves menu pause and render target", !warmPlayer.isPlaying && Get<RenderTexture>(warm, "runtimeTexture").GetInstanceID() == preparedTargetId);
+                    Invoke(controller, "CloseSettings", false);
+                    Check("Completed photo is displayed before prepared playback starts", !warmPlayer.isPlaying && !Get<RawImage>(warm, "overlay").enabled && Get<RawImage>(controller, "boardGuideImage").color.a == 1f);
+                    stage = 8;
+                    break;
+                case 8:
+                    var ready = Get<PuzzleCompletionVideo>(controller, "completionVideo");
+                    if (!Get<RawImage>(ready, "overlay").enabled || Get<CanvasGroup>(ready, "overlayGroup").alpha < 0.99f) break;
+                    Check("Prepared video starts after completion", Get<VideoPlayer>(ready, "videoPlayer").isPlaying);
+                    Check("Completion restores the gentle 0.45-second fade", Mathf.Abs(Get<float>(ready, "fadeDuration") - 0.45f) < 0.001f);
+                    Check("Completion releases generated piece sprites and textures", Get<List<PuzzlePieceView>>(controller, "activePieces").TrueForAll(piece => piece.PieceSprite == null && piece.GetComponent<Image>().sprite == null));
+                    SetCaptureSize(1600, 900);
+                    CheckBoardAspect(1280f / 855f);
+                    Check("Completed picture resizes after releasing piece artwork", Get<bool>(controller, "puzzleCompleted"));
+                    ready.Prepare(PuzzleMediaEntry.LoadDefault());
+                    ready.StopPlayback();
+                    stage = 9;
+                    nextUpdate = EditorApplication.timeSinceStartup + 0.5;
+                    break;
+                case 9:
+                    var cancelled = Get<PuzzleCompletionVideo>(controller, "completionVideo");
+                    var cancelledPlayer = Get<VideoPlayer>(cancelled, "videoPlayer");
+                    Check("Cancellation releases video resources and ignores late preparation", !cancelledPlayer.isPrepared && !cancelledPlayer.isPlaying && Get<RenderTexture>(cancelled, "runtimeTexture") == null && Get<PuzzleMediaEntry>(cancelled, "preparedMedia") == null);
+                    var unavailable = new PuzzleMediaEntry("Unavailable", Get<PuzzleMediaEntry>(controller, "activeMedia").Image);
+                    unavailable.SetCustomVideoPath(Path.Combine(Output, "missing-video.mp4"));
+                    cancelled.Prepare(unavailable);
+                    Check("Unavailable preloaded video does not interrupt puzzle with a message", !Get<TMP_Text>(cancelled, "statusText").gameObject.activeSelf);
+                    cancelled.Play(PuzzleMediaEntry.LoadDefault());
+                    stage = 10;
+                    break;
+                case 10:
+                    var exitingVideo = Get<PuzzleCompletionVideo>(controller, "completionVideo");
+                    if (!Get<RawImage>(exitingVideo, "overlay").enabled || Get<CanvasGroup>(exitingVideo, "overlayGroup").alpha < 0.99f) break;
+                    Invoke(controller, "OpenSettings");
+                    Capture("video-before-exit.png");
+                    stage = 11;
                     deadline = EditorApplication.timeSinceStartup + 10;
                     SessionState.SetBool(SessionKey + ".exitPending", true);
                     Get<PuzzleSettingsView>(controller, "settingsView").ExitButton.onClick.Invoke();
@@ -186,7 +265,15 @@ internal static class PuzzleGalleryValidation
         controller = Object.FindFirstObjectByType<PuzzleGameController>();
         Check("Scene controller exists", controller != null);
         SetCaptureSize(1920, 1080);
+        MeasureGeneration();
         var pieces = Get<List<PuzzlePieceView>>(controller, "activePieces");
+        Check("Game caps rendering at 60 FPS", Application.targetFrameRate == 60);
+        Check("Generated photo releases its CPU pixel copy", !Get<Texture2D>(controller, "selectedTexture").isReadable);
+        var hitImage = pieces[0].GetComponent<Image>();
+        var hitRect = pieces[0].RectTransform;
+        Check("Piece textures retain readable alpha hit testing", pieces[0].PieceSprite.texture.isReadable &&
+            !hitImage.IsRaycastLocationValid(RectTransformUtility.WorldToScreenPoint(camera, hitRect.TransformPoint(hitRect.rect.min + Vector2.one)), camera) &&
+            hitImage.IsRaycastLocationValid(RectTransformUtility.WorldToScreenPoint(camera, hitRect.position), camera));
         Check("Startup creates playable classic puzzle", pieces.Count == 16 && Get<PuzzlePieceMode>(controller, "activePieceMode") == PuzzlePieceMode.Classic);
         var defaultEntry = Get<PuzzleMediaEntry>(controller, "activeMedia");
         Check("Startup uses default ispu_1 photo and video", defaultEntry.Image == Resources.Load<Texture2D>("ispu_1") && defaultEntry.VideoClip == Resources.Load<VideoClip>("ispu_1"));
@@ -442,7 +529,53 @@ internal static class PuzzleGalleryValidation
         Check("Local validation video exists", File.Exists(videoPath));
         media.SetCustomVideoPath(videoPath);
         Set(media, "loopVideo", true);
-        Get<PuzzleCompletionVideo>(controller, "completionVideo").Play(media);
+        var completion = Get<PuzzleCompletionVideo>(controller, "completionVideo");
+        Get<VideoPlayer>(completion, "videoPlayer").frameReady += RecordFirstFrame;
+        playbackRequestedAt = EditorApplication.timeSinceStartup;
+        firstFrameLabel = "Cold fixture";
+        completion.Play(media);
+    }
+
+    private static void RecordFirstFrame(VideoPlayer player, long frame)
+    {
+        player.frameReady -= RecordFirstFrame;
+        if (firstFrameLabel == "Warm fixture")
+            Check("Prepared video preserves a short finished-photo moment", EditorApplication.timeSinceStartup - playbackRequestedAt >= 0.20);
+        performance.Add($"{firstFrameLabel} first frame: {(EditorApplication.timeSinceStartup - playbackRequestedAt) * 1000:0.0} ms");
+    }
+
+    private static void MeasureGeneration()
+    {
+        foreach (var grid in new[] { 4, 8 })
+        {
+            Set(controller, "activeRows", grid);
+            Set(controller, "activeColumns", grid);
+            var timer = System.Diagnostics.Stopwatch.StartNew();
+            Invoke(controller, "StartConfiguredPuzzle");
+            timer.Stop();
+            var textureMemory = 0L;
+            foreach (var piece in Get<List<PuzzlePieceView>>(controller, "activePieces"))
+                textureMemory += UnityEngine.Profiling.Profiler.GetRuntimeMemorySizeLong(piece.PieceSprite.texture);
+            performance.Add($"{grid}x{grid} generation: {timer.Elapsed.TotalMilliseconds:0.0} ms; piece texture memory: {textureMemory} bytes");
+        }
+        Set(controller, "activeRows", 4);
+        Set(controller, "activeColumns", 4);
+        Invoke(controller, "StartConfiguredPuzzle");
+    }
+
+    private static void BeginWarmVideoValidation()
+    {
+        var media = Get<PuzzleMediaEntry>(controller, "activeMedia").Copy();
+        media.SetCustomVideoPath(Path.GetFullPath("Tests/Fixtures/gallery-video.mp4"));
+        Set(controller, "activeMedia", media);
+        Set(controller, "activeRows", 4);
+        Set(controller, "activeColumns", 4);
+        Invoke(controller, "StartConfiguredPuzzle");
+        var pieces = Get<List<PuzzlePieceView>>(controller, "activePieces");
+        for (var i = 0; i < 12; i++) pieces[i].RectTransform.anchoredPosition = pieces[i].CorrectAnchoredPosition;
+        for (var i = 0; i < 12; i++) Invoke(controller, "ResolvePlacement", pieces[i].Group);
+        Invoke(controller, "EvaluateCompletion");
+        Check("Connecting 75 percent of pieces starts video preparation", !Get<bool>(controller, "puzzleCompleted") && Get<PuzzleMediaEntry>(Get<PuzzleCompletionVideo>(controller, "completionVideo"), "preparedMedia") != null);
     }
 
     private static void CheckLoosePieceEdgeDragging(List<PuzzlePieceView> pieces)
@@ -639,6 +772,7 @@ internal static class PuzzleGalleryValidation
 
     private static void Finish(bool passed, string message)
     {
+        File.WriteAllLines(Path.Combine(Output, "performance-result.txt"), performance);
         EditorApplication.update -= Tick;
         Application.runInBackground = previousRunInBackground;
         File.WriteAllText(Path.Combine(Output, "validation-result.txt"), $"Passed: {passed}\nChecks: {checks.Count}\n{message}\n" + string.Join("\n", checks));

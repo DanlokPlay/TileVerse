@@ -6,9 +6,11 @@ public sealed class PuzzlePieceView : MonoBehaviour, IBeginDragHandler, IDragHan
 {
     private PuzzleGameController controller;
     private Outline outline;
+    private Image image;
 
     public RectTransform RectTransform { get; private set; }
     public Sprite PieceSprite { get; private set; }
+    public Vector2 SourcePixelSize { get; private set; }
     public int Row { get; private set; }
     public int Column { get; private set; }
     public Vector2 CorrectAnchoredPosition { get; private set; }
@@ -18,12 +20,14 @@ public sealed class PuzzlePieceView : MonoBehaviour, IBeginDragHandler, IDragHan
     {
         RectTransform = (RectTransform)transform;
         outline = GetComponent<Outline>();
+        image = GetComponent<Image>();
     }
 
     public void Initialize(PuzzleGameController owner, Sprite sprite, int row, int column, Vector2 correctAnchoredPosition)
     {
         controller = owner;
         PieceSprite = sprite;
+        SourcePixelSize = sprite.rect.size;
         Row = row;
         Column = column;
         CorrectAnchoredPosition = correctAnchoredPosition;
@@ -32,6 +36,21 @@ public sealed class PuzzlePieceView : MonoBehaviour, IBeginDragHandler, IDragHan
     public void AssignGroup(PuzzlePieceGroup group)
     {
         Group = group;
+    }
+
+    public void ReleaseArtwork()
+    {
+        if (image != null)
+        {
+            image.enabled = false;
+            image.alphaHitTestMinimumThreshold = 0f;
+            image.sprite = null;
+        }
+        if (PieceSprite == null) return;
+        var texture = PieceSprite.texture;
+        Destroy(PieceSprite);
+        PieceSprite = null;
+        if (texture != null) Destroy(texture);
     }
 
     public void SetCorrectPosition(Vector2 position)

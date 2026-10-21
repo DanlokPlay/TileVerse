@@ -19,6 +19,7 @@ public sealed class PuzzleColorPicker : MonoBehaviour
     private Action<Color> changed;
     private Texture2D squareTexture;
     private Texture2D hueTexture;
+    private Color32[] squarePixels;
     private float hue;
     private float saturation;
     private float value;
@@ -97,9 +98,10 @@ public sealed class PuzzleColorPicker : MonoBehaviour
         if (squareTexture != null) return;
         squareTexture = new Texture2D(128, 128, TextureFormat.RGB24, false) { name = "Picker SV", wrapMode = TextureWrapMode.Clamp };
         hueTexture = new Texture2D(256, 1, TextureFormat.RGB24, false) { name = "Picker Hue", wrapMode = TextureWrapMode.Clamp };
-        var colors = new Color[256];
+        squarePixels = new Color32[128 * 128];
+        var colors = new Color32[256];
         for (var x = 0; x < 256; x++) colors[x] = Color.HSVToRGB(x / 255f, 1f, 1f);
-        hueTexture.SetPixels(colors); hueTexture.Apply();
+        hueTexture.SetPixels32(colors); hueTexture.Apply(false, true);
         SaturationValue.texture = squareTexture;
         HueBar.texture = hueTexture;
     }
@@ -107,16 +109,15 @@ public sealed class PuzzleColorPicker : MonoBehaviour
     private void RefreshSquare()
     {
         EnsureTextures();
-        var colors = new Color[128 * 128];
         var tint = Color.HSVToRGB(hue, 1f, 1f);
         for (var y = 0; y < 128; y++)
         for (var x = 0; x < 128; x++)
         {
             var color = Color.Lerp(Color.white, tint, x / 127f) * (y / 127f);
             color.a = 1f;
-            colors[y * 128 + x] = color;
+            squarePixels[y * 128 + x] = color;
         }
-        squareTexture.SetPixels(colors); squareTexture.Apply();
+        squareTexture.SetPixels32(squarePixels); squareTexture.Apply(false, false);
     }
 
     private void OnDestroy()

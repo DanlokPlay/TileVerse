@@ -64,12 +64,15 @@ public sealed class PuzzleGameController : MonoBehaviour
     private PuzzlePieceMode pendingPieceMode;
     private Vector2 lastCanvasSize;
     private float currentSidePieceScale = DefaultSidePieceScale;
+    private int previousFrameRate;
 
     public bool PreviewEnabled => previewEnabled;
     public bool LockPlacedPieces => lockPlacedPieces;
 
     private void Awake()
     {
+        previousFrameRate = Application.targetFrameRate;
+        Application.targetFrameRate = 60;
         EnsureEventSystem();
         EnsureMediaEntries();
         WireUi();
@@ -95,6 +98,7 @@ public sealed class PuzzleGameController : MonoBehaviour
 
     private void OnDestroy()
     {
+        Application.targetFrameRate = previousFrameRate;
         ClearExistingPuzzle();
         completionVideo?.StopPlayback();
         DestroyTexture(ref selectedTexture);
@@ -163,6 +167,9 @@ public sealed class PuzzleGameController : MonoBehaviour
             var view = pieceObject.GetComponent<PuzzlePieceView>(); view.Initialize(this, sprite, row, column, GetPieceCorrectPosition(slice));
             var group = new PuzzlePieceGroup(view); activePieces.Add(view); activeGroups.Add(group);
         }
+        // The guide only samples on the GPU after generation. Keep piece
+        // textures readable for transparent pointer hit testing.
+        selectedTexture.Apply(false, true);
     }
 
     public void BeginDrag(PuzzlePieceView piece, PointerEventData eventData)
@@ -296,12 +303,21 @@ public sealed class PuzzleGameController : MonoBehaviour
 
     private void EvaluateCompletion()
     {
+        if (!puzzleCompleted && activePieces.Count > 0 && activeMedia != null)
+        {
+            foreach (var group in activeGroups)
+                if (group.Members.Count * 4 >= activePieces.Count * 3)
+                {
+                    completionVideo?.Prepare(activeMedia);
+                    break;
+                }
+        }
         if (activePieces.Count == 0 || activeGroups.Count != 1) return;
         foreach (var piece in activePieces)
             if ((piece.RectTransform.anchoredPosition - piece.CorrectAnchoredPosition).sqrMagnitude > 0.25f) return;
         puzzleCompleted = true; SetGroupScale(activeGroups[0], FullPieceScale);
         boardGuideImage.color = Color.white;
-        foreach (var piece in activePieces) piece.GetComponent<Image>().enabled = false;
+        foreach (var piece in activePieces) piece.ReleaseArtwork();
         completionVideo?.Play(activeMedia);
     }
 
@@ -352,7 +368,7 @@ public sealed class PuzzleGameController : MonoBehaviour
         {
             var bytes = File.ReadAllBytes(path);
             texture = new Texture2D(2, 2, TextureFormat.RGBA32, false) { name = Path.GetFileNameWithoutExtension(path), filterMode = FilterMode.Bilinear, wrapMode = TextureWrapMode.Clamp };
-            if (!texture.LoadImage(bytes, false)) { Destroy(texture); ShowSettingsStatus("Не удалось открыть выбранное изображение.", true); return; }
+            if (!texture.LoadImage(bytes, true)) { Destroy(texture); ShowSettingsStatus("Не удалось открыть выбранное изображение.", true); return; }
             DestroyPendingRuntimeImageIfUnused(); pendingMedia = new PuzzleMediaEntry(texture.name, texture) { IsRuntimeImage = true }; RefreshSettingsLabels();
             ShowSettingsStatus("Фотография выбрана. Выберите видео для её оживления или примените пазл без видео.");
         }
@@ -397,7 +413,8 @@ public sealed class PuzzleGameController : MonoBehaviour
 
     private void QuitApplication()
     {
-        completionVideo?.StopPlayback();
+        // Keep the last video frame visible until Unity closes the window.
+        // OnDestroy owns playback and render-target cleanup.
 #if UNITY_EDITOR
         EditorApplication.isPlaying = false;
 #else
@@ -486,7 +503,7 @@ public sealed class PuzzleGameController : MonoBehaviour
             {
                 var slice = PuzzlePieceGenerator.CalculateSliceBounds(piece.Row, piece.Column, activeRows, activeColumns, selectedTexture.width, selectedTexture.height);
                 piece.SetCorrectPosition(GetPieceCorrectPosition(slice));
-                piece.RectTransform.sizeDelta = piece.PieceSprite.rect.size * currentLayout.UiScale;
+                piece.RectTransform.sizeDelta = piece.SourcePixelSize * currentLayout.UiScale;
                 piece.RectTransform.anchoredPosition = piece.CorrectAnchoredPosition + offset;
             }
             group.SetPlaced(wasSnapped);
@@ -616,8 +633,7 @@ public sealed class PuzzleGameController : MonoBehaviour
         foreach (var piece in activePieces)
         {
             if (piece == null) continue;
-            var sprite = piece.PieceSprite;
-            if (sprite != null) { var texture = sprite.texture; Destroy(sprite); if (texture != null) Destroy(texture); }
+            piece.ReleaseArtwork();
             Destroy(piece.gameObject);
         }
         activePieces.Clear(); activeGroups.Clear(); draggingGroup = null;
