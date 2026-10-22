@@ -123,7 +123,7 @@ internal static class PuzzleSceneInstaller
         frame.Apply(PuzzleFrameStyle.Default, size);
         guide.texture = preview;
         settings.SetPending(4, 4, PuzzlePieceMode.Classic, Color.black);
-        settings.SetGameplayPreferences(controller.PreviewEnabled, controller.LockPlacedPieces);
+        settings.SetGameplayPreferences(controller.PreviewEnabled, controller.LockPlacedPieces, controller.PieceSizeMode);
         settings.RefreshMedia(entries.Count > 0 ? entries[0] : null);
         settings.Fit();
         settings.Canvas.gameObject.SetActive(false);
@@ -144,7 +144,7 @@ internal static class PuzzleSceneInstaller
         var dim = CreateImage("Dimmer", root, new Color(0f, 0f, 0f, 0.65f), true);
         Stretch(dim.rectTransform);
         var panel = Rounded("Settings Panel", root, Panel, true);
-        Center(panel.rectTransform, new Vector2(620f, 760f));
+        Center(panel.rectTransform, new Vector2(620f, 890f));
         AddShadow(panel);
         view.Panel = panel.rectTransform;
         var title = Text("Title", panel.transform, "Настройки", 28f, TextAlignmentOptions.MidlineLeft);
@@ -224,8 +224,16 @@ internal static class PuzzleSceneInstaller
         view.ColorSample = Rounded("Current Color", view.CustomColorButton.transform, Color.black);
         Center(view.ColorSample.rectTransform, Vector2.one * 24f);
         view.ColorSample.rectTransform.anchoredPosition = new Vector2(232f, 0f);
+        var sizeLabel = Text("Piece Size Label", panel.transform, "Размер деталей", 16f, TextAlignmentOptions.MidlineLeft);
+        sizeLabel.color = Muted; Top(sizeLabel.rectTransform, 654f, 24f, 158f, -183f);
+        view.PieceSizeDropdown = ChoiceDropdown("Piece Size", panel.transform, PuzzleSettingsView.PieceSizeLabels);
+        Top((RectTransform)view.PieceSizeDropdown.transform, 644f, 44f, 350f, 87f);
+        var displayLabel = Text("Display Label", panel.transform, "Отображение", 16f, TextAlignmentOptions.MidlineLeft);
+        displayLabel.color = Muted; Top(displayLabel.rectTransform, 708f, 24f, 158f, -183f);
+        view.DisplayModeDropdown = ChoiceDropdown("Display Mode", panel.transform, PuzzleDisplaySettings.Labels);
+        Top((RectTransform)view.DisplayModeDropdown.transform, 698f, 44f, 350f, 87f);
         view.Status = Text("Status", panel.transform, "", 14f, TextAlignmentOptions.MidlineLeft);
-        Top(view.Status.rectTransform, 644f, 20f, 524f);
+        Top(view.Status.rectTransform, 758f, 20f, 524f);
         view.Status.gameObject.SetActive(false);
         view.ApplyButton = Button("Apply", panel.transform, "Применить", Accent);
         view.ApplyButton.GetComponentInChildren<TMP_Text>().color = new Color(0.12f, 0.1f, 0.07f);
@@ -468,6 +476,45 @@ internal static class PuzzleSceneInstaller
         Stretch(text.rectTransform);
         text.rectTransform.offsetMin = new Vector2(40f, 0f);
         return toggle;
+    }
+
+    private static TMP_Dropdown ChoiceDropdown(string name, Transform parent, IReadOnlyList<string> labels)
+    {
+        var resources = new TMP_DefaultControls.Resources
+        {
+            standard = rounded, background = rounded, inputField = rounded, mask = rounded,
+            knob = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Knob.psd"),
+            checkmark = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/Checkmark.psd"),
+            dropdown = AssetDatabase.GetBuiltinExtraResource<Sprite>("UI/Skin/DropdownArrow.psd")
+        };
+        var root = TMP_DefaultControls.CreateDropdown(resources);
+        root.name = name;
+        root.transform.SetParent(parent, false);
+        var dropdown = root.GetComponent<TMP_Dropdown>();
+        root.GetComponent<Image>().color = Surface;
+        dropdown.template.GetComponent<Image>().color = Panel;
+        dropdown.template.sizeDelta = new Vector2(0f, labels.Count * 44f + 8f);
+        dropdown.template.GetComponent<ScrollRect>().scrollSensitivity = 24f;
+        var toggle = dropdown.template.GetComponentInChildren<Toggle>(true);
+        ((RectTransform)toggle.transform).sizeDelta = new Vector2(0f, 44f);
+        toggle.targetGraphic.color = Surface;
+        toggle.graphic.color = Accent;
+        var colors = toggle.colors;
+        colors.highlightedColor = new Color(1.25f, 1.25f, 1.25f);
+        colors.selectedColor = colors.highlightedColor;
+        colors.fadeDuration = 0.08f;
+        toggle.colors = colors;
+        foreach (var text in root.GetComponentsInChildren<TMP_Text>(true))
+        {
+            text.font = font; text.fontSize = 18f; text.color = Ink;
+            text.alignment = TextAlignmentOptions.MidlineLeft; text.raycastTarget = false;
+            text.textWrappingMode = TextWrappingModes.NoWrap;
+            text.overflowMode = TextOverflowModes.Ellipsis;
+        }
+        dropdown.ClearOptions();
+        dropdown.AddOptions(new List<string>(labels));
+        dropdown.RefreshShownValue();
+        return dropdown;
     }
 
     private static TMP_InputField Input(string name, Transform parent, bool numeric)

@@ -6,6 +6,12 @@ public enum PuzzlePieceMode
     Tiles
 }
 
+public enum PuzzlePieceSizeMode
+{
+    Dynamic,
+    Original
+}
+
 public sealed class PuzzleSourceImage
 {
     public string DisplayName { get; }

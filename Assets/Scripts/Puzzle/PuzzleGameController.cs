@@ -17,12 +17,14 @@ public sealed class PuzzleGameController : MonoBehaviour
     private const float FullPieceScale = 1f;
     private const float GroupHoverScale = 1.04f;
     private const float SpawnPadding = 16f;
+    private const float MinimumVisiblePieceFraction = 0.10f;
     public const float DefaultSidePieceScale = 0.9f;
 
     [Header("Built-in artwork")]
     [SerializeField] private List<PuzzleMediaEntry> mediaEntries = new();
     [Header("Piece presentation")]
     [SerializeField] [Range(0.45f, 1f)] private float sideAreaPieceScale = DefaultSidePieceScale;
+    [SerializeField] private PuzzlePieceSizeMode pieceSizeMode = PuzzlePieceSizeMode.Dynamic;
 
     [Header("Gameplay scene objects")]
     [SerializeField] private Canvas gameCanvas;
@@ -68,6 +70,7 @@ public sealed class PuzzleGameController : MonoBehaviour
 
     public bool PreviewEnabled => previewEnabled;
     public bool LockPlacedPieces => lockPlacedPieces;
+    public PuzzlePieceSizeMode PieceSizeMode => pieceSizeMode;
 
     private void Awake()
     {
@@ -133,7 +136,7 @@ public sealed class PuzzleGameController : MonoBehaviour
     {
         if (uiWired || settingsView == null) return;
         settingsView.Bind(LoadCustomImage, LoadCustomVideo, ApplySettings, () => CloseSettings(false),
-            ConfirmReset, HideResetConfirmation, SelectPieceMode, SetBackground, SetPreview, SetPlacementLock, QuitApplication);
+            ConfirmReset, HideResetConfirmation, SelectPieceMode, SetBackground, SetPreview, SetPlacementLock, SetPieceSizeMode, QuitApplication);
         uiWired = true;
     }
 
@@ -341,7 +344,7 @@ public sealed class PuzzleGameController : MonoBehaviour
         completionVideo?.SetPaused(true);
         settingsView.Canvas.gameObject.SetActive(true);
         settingsView.SetPending(activeColumns, activeRows, pendingPieceMode, backgroundColor);
-        settingsView.SetGameplayPreferences(previewEnabled, lockPlacedPieces);
+        settingsView.SetGameplayPreferences(previewEnabled, lockPlacedPieces, pieceSizeMode);
         settingsView.Fit();
         RefreshSettingsLabels();
     }
@@ -400,7 +403,7 @@ public sealed class PuzzleGameController : MonoBehaviour
     {
         previewEnabled = enabled;
         RefreshGuideVisibility();
-        settingsView?.SetGameplayPreferences(previewEnabled, lockPlacedPieces);
+        settingsView?.SetGameplayPreferences(previewEnabled, lockPlacedPieces, pieceSizeMode);
     }
 
     private void SetPlacementLock(bool enabled)
@@ -408,7 +411,22 @@ public sealed class PuzzleGameController : MonoBehaviour
         ClearHover();
         lockPlacedPieces = enabled;
         foreach (var group in activeGroups) group.SetHighlighted(false);
-        settingsView?.SetGameplayPreferences(previewEnabled, lockPlacedPieces);
+        settingsView?.SetGameplayPreferences(previewEnabled, lockPlacedPieces, pieceSizeMode);
+    }
+
+    private void SetPieceSizeMode(PuzzlePieceSizeMode mode)
+    {
+        if ((uint)mode > (uint)PuzzlePieceSizeMode.Original) return;
+        ClearHover();
+        pieceSizeMode = mode;
+        UpdateSidePieceScale();
+        foreach (var group in activeGroups)
+        {
+            if (group == draggingGroup) continue;
+            ApplyGroupRestingScale(group);
+            if (!group.IsPlaced) KeepGroupOnScreen(group);
+        }
+        settingsView?.SetPieceSizeMode(mode);
     }
 
     private void QuitApplication()
@@ -468,6 +486,11 @@ public sealed class PuzzleGameController : MonoBehaviour
 
     private void UpdateSidePieceScale()
     {
+        if (pieceSizeMode == PuzzlePieceSizeMode.Original)
+        {
+            currentSidePieceScale = FullPieceScale;
+            return;
+        }
         var availableWidth = Mathf.Min(leftPiecesArea.rect.width, rightPiecesArea.rect.width) - SpawnPadding * 2f;
         var availableHeight = Mathf.Min(leftPiecesArea.rect.height, rightPiecesArea.rect.height) - SpawnPadding * 2f;
         currentSidePieceScale = Mathf.Max(0.01f, Mathf.Min(sideAreaPieceScale,
@@ -515,24 +538,63 @@ public sealed class PuzzleGameController : MonoBehaviour
 
     private void KeepGroupOnScreen(PuzzlePieceGroup group)
     {
+        if (group == null || group.Members.Count == 0) return;
+        var bounds = piecesLayer.rect;
+        if (GetGroupVisibleFraction(group, bounds, Vector2.zero) >= MinimumVisiblePieceFraction - 0.000001f) return;
+
         var min = Vector2.one * float.PositiveInfinity;
         var max = Vector2.one * float.NegativeInfinity;
         foreach (var piece in group.Members)
         {
-            var half = piece.RectTransform.sizeDelta * (piece.RectTransform.localScale.x * 0.5f);
-            min = Vector2.Min(min, piece.RectTransform.anchoredPosition - half);
-            max = Vector2.Max(max, piece.RectTransform.anchoredPosition + half);
+            var artwork = piece.GetArtworkRect();
+            min = Vector2.Min(min, artwork.min);
+            max = Vector2.Max(max, artwork.max);
         }
-        var bounds = piecesLayer.rect;
-        var delta = Vector2.zero;
-        // Pieces and fragments may remain partly offscreen. Recover them only
-        // when an entire axis is no longer visible, leaving a reachable edge.
-        var visible = 32f / Mathf.Max(0.01f, gameCanvas.scaleFactor);
-        if (max.x <= bounds.xMin) delta.x = bounds.xMin + visible - max.x;
-        else if (min.x >= bounds.xMax) delta.x = bounds.xMax - visible - min.x;
-        if (max.y <= bounds.yMin) delta.y = bounds.yMin + visible - max.y;
-        else if (min.y >= bounds.yMax) delta.y = bounds.yMax - visible - min.y;
-        group.MoveBy(delta);
+        // Run only on release/cancel/resize, never while the pointer is dragging.
+        // Find the nearest point along the return path that exposes a useful
+        // part of the fragment. Empty space inside a sparse group does not count.
+        var towardCenter = bounds.center - (min + max) * 0.5f;
+        var target = Mathf.Min(0.20f, GetGroupVisibleFraction(group, bounds, towardCenter));
+        var low = 0f;
+        var high = 1f;
+        for (var i = 0; i < 14; i++)
+        {
+            var middle = (low + high) * 0.5f;
+            var delta = towardCenter * middle;
+            if (GetGroupVisibleFraction(group, bounds, delta) >= target && HasReachablePiece(group, bounds, delta)) high = middle;
+            else low = middle;
+        }
+        group.MoveBy(towardCenter * high);
+    }
+
+    private static float GetGroupVisibleFraction(PuzzlePieceGroup group, Rect bounds, Vector2 offset)
+    {
+        var total = 0f;
+        var visible = 0f;
+        foreach (var piece in group.Members)
+        {
+            var rect = piece.GetArtworkRect();
+            rect.position += offset;
+            total += rect.width * rect.height;
+            visible += Mathf.Max(0f, Mathf.Min(rect.xMax, bounds.xMax) - Mathf.Max(rect.xMin, bounds.xMin)) *
+                Mathf.Max(0f, Mathf.Min(rect.yMax, bounds.yMax) - Mathf.Max(rect.yMin, bounds.yMin));
+        }
+        return total > 0f ? visible / total : 1f;
+    }
+
+    private bool HasReachablePiece(PuzzlePieceGroup group, Rect bounds, Vector2 offset)
+    {
+        var grip = 32f / Mathf.Max(0.01f, gameCanvas.scaleFactor);
+        foreach (var piece in group.Members)
+        {
+            var rect = piece.GetArtworkRect();
+            rect.position += offset;
+            var width = Mathf.Min(rect.xMax, bounds.xMax) - Mathf.Max(rect.xMin, bounds.xMin);
+            var height = Mathf.Min(rect.yMax, bounds.yMax) - Mathf.Max(rect.yMin, bounds.yMin);
+            if (width >= Mathf.Min(grip, Mathf.Min(rect.width, bounds.width)) - 0.01f &&
+                height >= Mathf.Min(grip, Mathf.Min(rect.height, bounds.height)) - 0.01f) return true;
+        }
+        return false;
     }
 
     private void UpdateBoardGuide()
@@ -599,6 +661,7 @@ public sealed class PuzzleGameController : MonoBehaviour
     private void SetGroupScale(PuzzlePieceGroup group, float scale)
     {
         if (group == null) return;
+        if (pieceSizeMode == PuzzlePieceSizeMode.Original) scale = FullPieceScale;
         if (group.Members.Count > 1 || group.IsPlaced) scale = Mathf.Max(FullPieceScale, scale);
         scale = Mathf.Clamp(scale, 0.01f, GroupHoverScale);
         if (group.Members.Count == 0) return;

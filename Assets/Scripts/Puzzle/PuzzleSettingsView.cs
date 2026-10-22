@@ -31,6 +31,8 @@ public sealed class PuzzleSettingsView : MonoBehaviour
     public Button ApplyButton;
     public Button CloseButton;
     public Button ExitButton;
+    public TMP_Dropdown DisplayModeDropdown;
+    public TMP_Dropdown PieceSizeDropdown;
     public GameObject Confirmation;
     public RectTransform ConfirmationPanel;
     public Button ConfirmButton;
@@ -49,6 +51,8 @@ public sealed class PuzzleSettingsView : MonoBehaviour
     private Color background;
     private Action<Color> backgroundChanged;
     private bool bound;
+    private PuzzleDisplaySettings displaySettings;
+    public static readonly string[] PieceSizeLabels = { "Динамические", "Оригинальные (1:1)" };
 
     public int Columns => ReadGrid(ColumnsInput);
     public int Rows => ReadGrid(RowsInput);
@@ -57,7 +61,7 @@ public sealed class PuzzleSettingsView : MonoBehaviour
 
     public void Bind(Action photo, Action video, Action apply, Action close, Action confirm,
         Action cancel, Action<PuzzlePieceMode> formChanged, Action<Color> colorChanged,
-        Action<bool> previewChanged, Action<bool> lockPlacedChanged, Action quit)
+        Action<bool> previewChanged, Action<bool> lockPlacedChanged, Action<PuzzlePieceSizeMode> sizeChanged, Action quit)
     {
         if (bound) return;
         bound = true;
@@ -86,6 +90,20 @@ public sealed class PuzzleSettingsView : MonoBehaviour
         }
         ColorPicker.Initialize(ChooseBackground);
         CustomColorButton.onClick.AddListener(() => { ColorPicker.Open(background); Fit(); });
+        displaySettings = new PuzzleDisplaySettings();
+        if (DisplayModeDropdown != null)
+        {
+            DisplayModeDropdown.ClearOptions();
+            DisplayModeDropdown.AddOptions(new System.Collections.Generic.List<string>(PuzzleDisplaySettings.Labels));
+            RefreshDisplayMode();
+            DisplayModeDropdown.onValueChanged.AddListener(index => displaySettings.Apply((PuzzleDisplayMode)index));
+        }
+        if (PieceSizeDropdown != null)
+        {
+            PieceSizeDropdown.ClearOptions();
+            PieceSizeDropdown.AddOptions(new System.Collections.Generic.List<string>(PieceSizeLabels));
+            PieceSizeDropdown.onValueChanged.AddListener(index => sizeChanged((PuzzlePieceSizeMode)index));
+        }
     }
 
     public void SetPending(int columns, int rows, PuzzlePieceMode form, Color color)
@@ -98,10 +116,23 @@ public sealed class PuzzleSettingsView : MonoBehaviour
         NormalizeGrid();
     }
 
-    public void SetGameplayPreferences(bool preview, bool lockPlaced)
+    public void SetGameplayPreferences(bool preview, bool lockPlaced, PuzzlePieceSizeMode sizeMode)
     {
         PreviewToggle.SetIsOnWithoutNotify(preview);
         LockPlacedToggle.SetIsOnWithoutNotify(lockPlaced);
+        SetPieceSizeMode(sizeMode);
+        RefreshDisplayMode();
+    }
+
+    public void SetPieceSizeMode(PuzzlePieceSizeMode mode)
+    {
+        if (PieceSizeDropdown != null) PieceSizeDropdown.SetValueWithoutNotify((int)mode);
+    }
+
+    public void RefreshDisplayMode()
+    {
+        if (DisplayModeDropdown != null && displaySettings != null)
+            DisplayModeDropdown.SetValueWithoutNotify((int)displaySettings.CurrentMode);
     }
 
     public void RefreshMedia(PuzzleMediaEntry media)
@@ -152,6 +183,16 @@ public sealed class PuzzleSettingsView : MonoBehaviour
 
     public bool CloseTransient()
     {
+        if (PieceSizeDropdown != null && PieceSizeDropdown.IsExpanded)
+        {
+            PieceSizeDropdown.Hide();
+            return true;
+        }
+        if (DisplayModeDropdown != null && DisplayModeDropdown.IsExpanded)
+        {
+            DisplayModeDropdown.Hide();
+            return true;
+        }
         if (!ColorPicker.IsOpen) return false;
         ColorPicker.Close();
         return true;

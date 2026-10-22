@@ -45,6 +45,27 @@ internal static class PuzzleGalleryValidation
 
     public static void RunAutomated() => StartValidation(false);
 
+    public static void RunRebuiltAutomated()
+    {
+        EditorSceneManager.OpenScene("Assets/Scenes/SampleScene.unity");
+        EditorApplication.delayCall += () =>
+        {
+            try
+            {
+                PuzzleSceneInstaller.InstallCurrentScene();
+                StartValidation(false);
+            }
+            catch (Exception error)
+            {
+                foreach (var root in UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects())
+                    Debug.Log("Validation scene root: " + root.name + "; active=" + root.activeInHierarchy +
+                        "; controller=" + (root.GetComponentInChildren<PuzzleGameController>(true) != null));
+                Debug.LogException(error);
+                if (Application.isBatchMode) EditorApplication.Exit(1);
+            }
+        };
+    }
+
     private static void StartValidation(bool prompt)
     {
         if (prompt && !Application.isBatchMode && !EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
@@ -133,6 +154,27 @@ internal static class PuzzleGalleryValidation
                 case 2:
                     var player = Get<VideoPlayer>(Get<PuzzleCompletionVideo>(controller, "completionVideo"), "videoPlayer");
                     Check("Esc settings pause playback", !player.isPlaying && Math.Abs(player.time - pausedVideoTime) < 0.05);
+                    var displaySettings = Get<PuzzleSettingsView>(controller, "settingsView");
+                    // Let TMP_Dropdown.Start run naturally after the menu is
+                    // activated, as it does before a real pointer click.
+                    displaySettings.DisplayModeDropdown.Show();
+                    Check("Display dropdown opens inside the settings canvas", displaySettings.DisplayModeDropdown.IsExpanded);
+                    stage = 12;
+                    nextUpdate = EditorApplication.timeSinceStartup + 0.2;
+                    break;
+                case 12:
+                    Capture("display-modes.png");
+                    var expandedSettings = Get<PuzzleSettingsView>(controller, "settingsView");
+                    Check("Escape closes the display list before the menu", expandedSettings.CloseTransient() && expandedSettings.Canvas.gameObject.activeSelf);
+                    expandedSettings.PieceSizeDropdown.Show();
+                    Check("Piece size dropdown opens inside the settings canvas", expandedSettings.PieceSizeDropdown.IsExpanded);
+                    stage = 13;
+                    nextUpdate = EditorApplication.timeSinceStartup + 0.2;
+                    break;
+                case 13:
+                    Capture("size-modes.png");
+                    var sizeSettings = Get<PuzzleSettingsView>(controller, "settingsView");
+                    Check("Escape closes the piece size list before the menu", sizeSettings.CloseTransient() && sizeSettings.Canvas.gameObject.activeSelf);
                     Invoke(controller, "CloseSettings", false);
                     stage = 3;
                     nextUpdate = EditorApplication.timeSinceStartup + 0.5;
@@ -294,10 +336,16 @@ internal static class PuzzleGalleryValidation
         var loosePosition = sample.RectTransform.anchoredPosition;
         controller.BeginHover(sample);
         Check("Hover enlarges a loose piece to assembly size", sample.RectTransform.localScale == Vector3.one && sample.RectTransform.localScale.x > looseScale.x);
+        var hoverOutline = sample.GetComponent<Outline>();
+        Check("Hover softly outlines only the puzzle artwork in light blue", hoverOutline.useGraphicAlpha &&
+            hoverOutline.effectColor.b > 0.95f && hoverOutline.effectColor.g > 0.7f && hoverOutline.effectColor.r < 0.5f &&
+            hoverOutline.effectColor.a > 0.75f && hoverOutline.effectDistance.x == 2f);
+        Capture("piece-hover.png");
         controller.BeginHover(sample);
         Check("Repeated hover entry does not change the piece position", sample.RectTransform.anchoredPosition == loosePosition);
         controller.EndHover(sample);
         Check("Pointer exit restores loose-piece scale", sample.RectTransform.localScale == looseScale);
+        Check("Pointer exit restores the unobtrusive piece shadow", hoverOutline.effectColor == new Color(0f, 0f, 0f, 0.3f) && hoverOutline.effectDistance.x == 1.2f);
         controller.BeginHover(sample);
         var grabbed = Vector2.Scale(sample.RectTransform.rect.size, new Vector2(0.1f, 0.08f));
         var pointer = PiecePointer(sample, grabbed);
@@ -311,6 +359,8 @@ internal static class PuzzleGalleryValidation
         sample.Group.SetHighlighted(false);
         Invoke(controller, "ApplyGroupRestingScale", sample.Group);
         CheckLoosePieceEdgeDragging(pieces);
+        CheckEdgeRecoveryThreshold(pieces[0], "Single piece");
+        CheckPieceSizePreference(settings, pieces[0]);
         var frameView = Get<PuzzleFrameView>(controller, "frameView");
         var frameImage = controller.GetComponent<PuzzleOrnateFrameView>().FrameImage;
         Check("Frame tiles the original rails with transparent center", frameImage.type == Image.Type.Tiled && !frameImage.fillCenter && frameImage.sprite.border == Vector4.one * 320f);
@@ -343,6 +393,19 @@ internal static class PuzzleGalleryValidation
         Invoke(controller, "OpenSettings");
         Check("Settings are larger than the previous revision", settings.Panel.rect.height * settings.Panel.localScale.y > 900f);
         Check("Preview and placement lock default to enabled", settings.PreviewToggle.isOn && settings.LockPlacedToggle.isOn);
+        Check("Display modes expose all four requested labels", settings.DisplayModeDropdown != null && settings.DisplayModeDropdown.options.Count == 4 &&
+            settings.DisplayModeDropdown.options[0].text == "Полный экран" && settings.DisplayModeDropdown.options[1].text == "Эксклюзивный полный экран" &&
+            settings.DisplayModeDropdown.options[2].text == "Оконный на весь экран" && settings.DisplayModeDropdown.options[3].text == "Оконный");
+        var originalDisplay = settings.DisplayModeDropdown.value;
+        for (var index = 0; index < 4; index++)
+        {
+            settings.DisplayModeDropdown.value = index;
+            settings.RefreshDisplayMode();
+            Check("Display mode " + index + " applies independently of puzzle settings", settings.DisplayModeDropdown.value == index &&
+                pieces[0].GetInstanceID() == firstId && !Get<bool>(controller, "waitingForResetConfirmation"));
+            Check("Display mode " + index + " maps to its Unity mode", PuzzleDisplaySettings.FromUnityMode(PuzzleDisplaySettings.ToUnityMode((PuzzleDisplayMode)index)) == (PuzzleDisplayMode)index);
+        }
+        settings.DisplayModeDropdown.value = originalDisplay;
         Capture("settings-black.png");
         settings.PreviewToggle.isOn = false;
         Check("Preview disables only the photo hint without restarting", photo.color.a == 0f && pieces[0].GetInstanceID() == firstId && settings.Preview.texture != null);
@@ -388,9 +451,13 @@ internal static class PuzzleGalleryValidation
         Check("Form change requests restart", settings.Confirmation.activeSelf);
         settings.CancelButton.onClick.Invoke();
         Check("Restart cancellation preserves puzzle", pieces[0].GetInstanceID() == firstId);
+        settings.PieceSizeDropdown.value = (int)PuzzlePieceSizeMode.Original;
         settings.ApplyButton.onClick.Invoke();
         settings.ConfirmButton.onClick.Invoke();
         Check("Confirmed form change creates tiles", Get<PuzzlePieceMode>(controller, "activePieceMode") == PuzzlePieceMode.Tiles && pieces[0].GetInstanceID() != firstId);
+        Check("A new puzzle retains original piece size preference", controller.PieceSizeMode == PuzzlePieceSizeMode.Original &&
+            pieces.TrueForAll(piece => piece.RectTransform.localScale == Vector3.one));
+        settings.PieceSizeDropdown.value = (int)PuzzlePieceSizeMode.Dynamic;
         foreach (var piece in pieces)
         {
             var slice = PuzzlePieceGenerator.CalculateSliceBounds(piece.Row, piece.Column, 4, 4,  Get<Texture2D>(controller, "selectedTexture").width, Get<Texture2D>(controller, "selectedTexture").height);
@@ -454,6 +521,14 @@ internal static class PuzzleGalleryValidation
         var expectedSpacing = second.CorrectAnchoredPosition - first.CorrectAnchoredPosition;
         Check("Connected fragment keeps full scale in the side area", first.RectTransform.localScale == Vector3.one && second.RectTransform.localScale == Vector3.one);
         Check("Connected fragment keeps its seams in the side area", ((second.RectTransform.anchoredPosition - first.RectTransform.anchoredPosition) - expectedSpacing).sqrMagnitude < 0.01f);
+        settings.PieceSizeDropdown.value = (int)PuzzlePieceSizeMode.Original;
+        var originalFragmentPosition = first.RectTransform.anchoredPosition;
+        controller.BeginHover(first);
+        Check("Original-size connected fragment highlights without enlarging or moving", first.RectTransform.localScale == Vector3.one &&
+            second.RectTransform.localScale == Vector3.one && first.RectTransform.anchoredPosition == originalFragmentPosition &&
+            ((second.RectTransform.anchoredPosition - first.RectTransform.anchoredPosition) - expectedSpacing).sqrMagnitude < 0.01f);
+        controller.EndHover(first);
+        settings.PieceSizeDropdown.value = (int)PuzzlePieceSizeMode.Dynamic;
         controller.BeginHover(first);
         var enlargedScale = first.RectTransform.localScale.x;
         Check("Hover enlarges a connected fragment uniformly", enlargedScale > 1f && Mathf.Abs(second.RectTransform.localScale.x - enlargedScale) < 0.0001f && ((second.RectTransform.anchoredPosition - first.RectTransform.anchoredPosition) / enlargedScale - expectedSpacing).sqrMagnitude < 0.01f);
@@ -495,6 +570,7 @@ internal static class PuzzleGalleryValidation
             Check("Partly visible tall fragment does not jump on release", (grip.RectTransform.anchoredPosition - tallBeforeRelease).sqrMagnitude < 0.01f);
         }
         Capture("tall-fragment-free-drag.png");
+        CheckEdgeRecoveryThreshold(first, "Connected fragment");
         var outsidePointer = PiecePointer(third, Vector2.zero);
         controller.BeginDrag(third, outsidePointer);
         outsidePointer.position += new Vector2(10000f, 10000f);
@@ -504,11 +580,14 @@ internal static class PuzzleGalleryValidation
         foreach (var member in first.Group.Members) member.RectTransform.anchoredPosition = member.CorrectAnchoredPosition;
         Invoke(controller, "ResolvePlacement", first.Group);
         settings.LockPlacedToggle.isOn = true;
+        settings.PieceSizeDropdown.value = (int)PuzzlePieceSizeMode.Original;
         SetCaptureSize(800, 1000);
         CheckBoardAspect(0.5f);
         Check("Resizing preserves merged groups", first.Group == second.Group && (first.RectTransform.anchoredPosition - first.CorrectAnchoredPosition).sqrMagnitude < 0.25f && (second.RectTransform.anchoredPosition - second.CorrectAnchoredPosition).sqrMagnitude < 0.25f);
         Check("Resizing preserves placement lock state", first.Group.IsPlaced && controller.LockPlacedPieces && first.RectTransform.localScale == Vector3.one);
+        Check("Original-size mode remains one-to-one in a portrait window", pieces.TrueForAll(piece => piece.RectTransform.localScale == Vector3.one));
         Capture("portrait-window.png");
+        settings.PieceSizeDropdown.value = (int)PuzzlePieceSizeMode.Dynamic;
         Invoke(controller, "OpenSettings");
         var panel = settings.Panel;
         var root = (RectTransform)settings.Canvas.transform;
@@ -643,6 +722,123 @@ internal static class PuzzleGalleryValidation
             if (layer.rect.Overlaps(Rect.MinMaxRect(center.x - half.x, center.y - half.y, center.x + half.x, center.y + half.y))) return true;
         }
         return false;
+    }
+
+    private static void CheckEdgeRecoveryThreshold(PuzzlePieceView sample, string label)
+    {
+        var layer = Get<RectTransform>(controller, "piecesLayer");
+        var group = sample.Group;
+        var all = Get<List<PuzzlePieceView>>(controller, "activePieces");
+        var positions = all.ConvertAll(piece => piece.RectTransform.anchoredPosition);
+        var previousScale = Get<float>(controller, "currentSidePieceScale");
+        var wasPlaced = group.IsPlaced;
+        var directions = new[] { Vector2.left, Vector2.right, Vector2.down, Vector2.up,
+            new Vector2(-1f, -1f), new Vector2(-1f, 1f), new Vector2(1f, -1f), new Vector2(1f, 1f) };
+        try
+        {
+            Set(controller, "currentSidePieceScale", 1f);
+            foreach (var piece in all)
+                if (piece.Group != group) piece.RectTransform.anchoredPosition = layer.rect.center;
+            for (var edge = 0; edge < directions.Length; edge++)
+            foreach (var fraction in new[] { 0.11f, 0.09f })
+            {
+                Invoke(controller, "SetGroupScale", group, 1f);
+                var min = Vector2.one * float.PositiveInfinity;
+                var max = Vector2.one * float.NegativeInfinity;
+                foreach (var member in group.Members)
+                {
+                    var rect = member.GetArtworkRect();
+                    min = Vector2.Min(min, rect.min); max = Vector2.Max(max, rect.max);
+                }
+                group.MoveBy(layer.rect.center - (min + max) * 0.5f);
+                var far = directions[edge].normalized * (layer.rect.size.magnitude + (max - min).magnitude + 100f);
+                var low = 0f;
+                var high = 1f;
+                for (var iteration = 0; iteration < 20; iteration++)
+                {
+                    var middle = (low + high) * 0.5f;
+                    if (VisibleArtworkFraction(group, layer.rect, far * middle) > fraction) low = middle;
+                    else high = middle;
+                }
+                var pointer = PiecePointer(sample, Vector2.zero);
+                controller.BeginDrag(sample, pointer);
+                pointer.position += RectTransformUtility.WorldToScreenPoint(camera, layer.TransformPoint(far * high)) -
+                    RectTransformUtility.WorldToScreenPoint(camera, layer.TransformPoint(Vector2.zero));
+                controller.Drag(sample, pointer);
+                var before = sample.RectTransform.anchoredPosition;
+                var spacing = group.Members[group.Members.Count - 1].RectTransform.anchoredPosition - before;
+                Check($"{label} moves freely to {fraction:P0} visibility at edge {edge}",
+                    Mathf.Abs(VisibleArtworkFraction(group, layer.rect, Vector2.zero) - fraction) < 0.001f &&
+                    (RectTransformUtility.WorldToScreenPoint(camera, sample.RectTransform.position) - pointer.position).sqrMagnitude < 0.25f);
+                controller.EndDrag(sample);
+                if (fraction > 0.10f)
+                    Check($"{label} with eleven percent visible stays at edge {edge}", (sample.RectTransform.anchoredPosition - before).sqrMagnitude < 0.01f);
+                else
+                    Check($"{label} with nine percent visible rebounds on release at edge {edge}",
+                        VisibleArtworkFraction(group, layer.rect, Vector2.zero) >= 0.199f &&
+                        ((group.Members[group.Members.Count - 1].RectTransform.anchoredPosition - sample.RectTransform.anchoredPosition) - spacing).sqrMagnitude < 0.01f &&
+                        sample.RectTransform.localScale == Vector3.one);
+            }
+        }
+        finally
+        {
+            Set(controller, "draggingGroup", null); Set(controller, "draggedPiece", null);
+            Set(controller, "currentSidePieceScale", previousScale);
+            group.SetPlaced(wasPlaced);
+            group.SetHighlighted(false);
+            for (var i = 0; i < all.Count; i++) all[i].RectTransform.anchoredPosition = positions[i];
+            Invoke(controller, "ApplyGroupRestingScale", group);
+        }
+    }
+
+    private static void CheckPieceSizePreference(PuzzleSettingsView settings, PuzzlePieceView sample)
+    {
+        Check("Piece size offers dynamic and original modes", settings.PieceSizeDropdown != null &&
+            settings.PieceSizeDropdown.options.Count == 2 && settings.PieceSizeDropdown.options[0].text == "Динамические" &&
+            settings.PieceSizeDropdown.options[1].text == "Оригинальные (1:1)");
+        Check("Dynamic piece sizing remains the startup default", controller.PieceSizeMode == PuzzlePieceSizeMode.Dynamic);
+        var pieces = Get<List<PuzzlePieceView>>(controller, "activePieces");
+        var instance = sample.GetInstanceID();
+        var position = sample.RectTransform.anchoredPosition;
+        var scale = sample.RectTransform.localScale;
+        settings.PieceSizeDropdown.value = (int)PuzzlePieceSizeMode.Original;
+        Check("Original sizes apply live without recreating or repositioning pieces", controller.PieceSizeMode == PuzzlePieceSizeMode.Original &&
+            sample.GetInstanceID() == instance && sample.RectTransform.anchoredPosition == position &&
+            pieces.TrueForAll(piece => piece.RectTransform.localScale == Vector3.one));
+        var expectedSize = sample.SourcePixelSize * Get<PuzzleLayoutMetrics>(controller, "currentLayout").UiScale;
+        Check("Original piece dimensions match the assembled picture", (sample.RectTransform.rect.size - expectedSize).sqrMagnitude < 0.01f);
+        controller.BeginHover(sample);
+        Check("Original piece hover keeps its one-to-one size and blue outline", sample.RectTransform.localScale == Vector3.one &&
+            sample.RectTransform.anchoredPosition == position && sample.GetComponent<Outline>().effectColor.b > 0.95f);
+        controller.EndHover(sample);
+        Capture("size-original.png");
+        Invoke(controller, "OpenSettings");
+        Check("Opening settings reflects the original piece size mode", settings.PieceSizeDropdown.value == (int)PuzzlePieceSizeMode.Original);
+        settings.PreviewToggle.isOn = false;
+        Check("Changing another live preference retains original sizing", settings.PieceSizeDropdown.value == (int)PuzzlePieceSizeMode.Original && sample.RectTransform.localScale == Vector3.one);
+        settings.PreviewToggle.isOn = true;
+        Invoke(controller, "CloseSettings", false);
+        Invoke(controller, "OpenSettings");
+        Check("Closing and reopening settings preserves original sizing", settings.PieceSizeDropdown.value == (int)PuzzlePieceSizeMode.Original);
+        settings.PieceSizeDropdown.value = (int)PuzzlePieceSizeMode.Dynamic;
+        Invoke(controller, "CloseSettings", false);
+        Check("Returning to dynamic sizing restores loose-piece scale without reset", controller.PieceSizeMode == PuzzlePieceSizeMode.Dynamic &&
+            sample.GetInstanceID() == instance && sample.RectTransform.localScale == scale && sample.RectTransform.anchoredPosition == position);
+    }
+
+    private static float VisibleArtworkFraction(PuzzlePieceGroup group, Rect bounds, Vector2 offset)
+    {
+        var total = 0f;
+        var visible = 0f;
+        foreach (var piece in group.Members)
+        {
+            var rect = piece.GetArtworkRect(); rect.position += offset;
+            total += rect.width * rect.height;
+            var width = Mathf.Max(0f, Mathf.Min(bounds.xMax, rect.xMax) - Mathf.Max(bounds.xMin, rect.xMin));
+            var height = Mathf.Max(0f, Mathf.Min(bounds.yMax, rect.yMax) - Mathf.Max(bounds.yMin, rect.yMin));
+            visible += width * height;
+        }
+        return visible / total;
     }
 
     private static PointerEventData PiecePointer(PuzzlePieceView piece, Vector2 local)
